@@ -1,0 +1,3 @@
+# The commit message check and its hook must keep LF line endings to run in bash, on Windows too.
+.githooks/* text eol=lf
+.github/scripts/*.sh text eol=lf
