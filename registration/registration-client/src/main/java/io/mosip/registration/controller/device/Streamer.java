@@ -5,6 +5,9 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.StringWriter;
+import java.util.Collections;
+import java.util.Set;
+import java.util.WeakHashMap;
 
 import org.springframework.stereotype.Component;
 
@@ -22,8 +25,11 @@ public class Streamer {
 
 	private InputStream urlStream;
 
-	// Optional receiver of the frames, for face liveness. Cleared by stop().
+	// Optional receiver of the frames, for face liveness. Cleared when the client closes the stream.
 	private volatile StreamFrameListener frameListener;
+
+	// Streams closed by the client: their end is not an interruption of the device.
+	private final Set<InputStream> closedStreams = Collections.newSetFromMap(new WeakHashMap<>());
 
 	public void setFrameListener(StreamFrameListener frameListener) {
 		this.frameListener = frameListener;
@@ -34,9 +40,21 @@ public class Streamer {
 		if (listener != null) {
 			try {
 				listener.onFrame(frame);
-			} catch (RuntimeException exception) {
+			} catch (Throwable exception) {
 				LOGGER.error("Frame listener failed", exception);
 			}
+		}
+	}
+
+	private void markClosedByClient(InputStream stream) {
+		synchronized (closedStreams) {
+			closedStreams.add(stream);
+		}
+	}
+
+	private boolean isClosedByClient(InputStream stream) {
+		synchronized (closedStreams) {
+			return closedStreams.contains(stream);
 		}
 	}
 
@@ -45,7 +63,7 @@ public class Streamer {
 		if (listener != null) {
 			try {
 				listener.onStreamInterrupted(cause);
-			} catch (RuntimeException exception) {
+			} catch (Throwable exception) {
 				LOGGER.error("Frame listener failed", exception);
 			}
 		}
@@ -54,6 +72,7 @@ public class Streamer {
 	public void setUrlStream(InputStream inputStream) {
 
 		if (urlStream != null) {
+			markClosedByClient(urlStream);
 			try {
 				urlStream.close();
 			} catch (IOException exception) {
@@ -70,6 +89,7 @@ public class Streamer {
 		} else {
 			this.urlStream = null;
 			isRunning = false;
+			frameListener = null;
 		}
 
 	}
@@ -138,7 +158,9 @@ public class Streamer {
 						}
 					} catch (Throwable t) {
 						LOGGER.error("Failed in streamer_thread", t);
-						notifyInterrupted(t);
+						if (!isClosedByClient(inputStream)) {
+							notifyInterrupted(t);
+						}
 						urlStream = null;
 					}
 				}
@@ -226,8 +248,10 @@ public class Streamer {
 		if (streamer_thread != null) {
 			try {
 				isRunning = false;
-				if (urlStream != null)
+				if (urlStream != null) {
+					markClosedByClient(urlStream);
 					urlStream.close();
+				}
 				streamer_thread = null;
 			} catch (IOException e) {
 				LOGGER.error("Failed to close the stream thread", e);
