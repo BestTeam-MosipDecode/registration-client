@@ -1,6 +1,7 @@
 package io.mosip.registration.controller.device;
 
 import java.io.ByteArrayInputStream;
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.StringWriter;
@@ -10,6 +11,7 @@ import org.springframework.stereotype.Component;
 import io.mosip.kernel.core.logger.spi.Logger;
 import io.mosip.registration.config.AppConfig;
 import io.mosip.registration.context.SessionContext;
+import io.mosip.registration.liveness.StreamFrameListener;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 
@@ -19,6 +21,35 @@ public class Streamer {
 	private static final Logger LOGGER = AppConfig.getLogger(Streamer.class);
 
 	private InputStream urlStream;
+
+	// Optional receiver of the frames, for face liveness. Cleared by stop().
+	private volatile StreamFrameListener frameListener;
+
+	public void setFrameListener(StreamFrameListener frameListener) {
+		this.frameListener = frameListener;
+	}
+
+	void notifyFrame(byte[] frame) {
+		StreamFrameListener listener = frameListener;
+		if (listener != null) {
+			try {
+				listener.onFrame(frame);
+			} catch (RuntimeException exception) {
+				LOGGER.error("Frame listener failed", exception);
+			}
+		}
+	}
+
+	void notifyInterrupted(Throwable cause) {
+		StreamFrameListener listener = frameListener;
+		if (listener != null) {
+			try {
+				listener.onStreamInterrupted(cause);
+			} catch (RuntimeException exception) {
+				LOGGER.error("Frame listener failed", exception);
+			}
+		}
+	}
 
 	public void setUrlStream(InputStream inputStream) {
 
@@ -98,6 +129,7 @@ public class Streamer {
 				while (null != urlStream) {
 					try {
 						imageBytes = retrieveNextImage(urlStream);
+						notifyFrame(imageBytes);
 						ByteArrayInputStream imageStream = new ByteArrayInputStream(imageBytes);
 						Image img = new Image(imageStream);
 						streamImage.setImage(img);
@@ -106,6 +138,7 @@ public class Streamer {
 						}
 					} catch (Throwable t) {
 						LOGGER.error("Failed in streamer_thread", t);
+						notifyInterrupted(t);
 						urlStream = null;
 					}
 				}
@@ -153,8 +186,11 @@ public class Streamer {
 		}
 
 		// 255 indicates the start of the jpeg image
-		while (urlStream.read() != 255) {
-
+		int nextByte;
+		while ((nextByte = urlStream.read()) != 255) {
+			if (nextByte == -1) {
+				throw new EOFException("End of the device stream");
+			}
 		}
 
 		// && urlStream.read()!=-1
@@ -180,6 +216,9 @@ public class Streamer {
 	 * Stop the loop, and allow it to clean up
 	 */
 	public synchronized void stop() {
+
+		// A deliberate stop is not an interruption of the stream.
+		frameListener = null;
 
 		// Enable Auto-Logout
 		SessionContext.setAutoLogout(true);
