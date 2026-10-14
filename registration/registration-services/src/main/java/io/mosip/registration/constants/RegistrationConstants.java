@@ -987,6 +987,27 @@ public class RegistrationConstants {
 	public static final String FACE_RETRY_COUNT = "mosip.registration.num_of_face_retries";
 	public static final String PHOTO_RETRY_COUNT = "mosip.registration.num_of_photo_retries";
 
+	// Face liveness keys, described in docs/configuration.md of face-liveness-pad. A workflow overrides a key by
+	// inserting its name (resident, operator, supervisor) after the prefix.
+	public static final String LIVENESS_PREFIX = "mosip.registration.face.liveness.";
+	public static final String LIVENESS_ENABLED = LIVENESS_PREFIX + "enabled";
+	public static final String LIVENESS_PASS_THRESHOLD = LIVENESS_PREFIX + "passive.threshold.pass";
+	public static final String LIVENESS_ATTACK_THRESHOLD = LIVENESS_PREFIX + "passive.threshold.attack";
+	public static final String LIVENESS_MIN_FRAMES = LIVENESS_PREFIX + "passive.min_frames";
+	public static final String LIVENESS_WINDOW_MS = LIVENESS_PREFIX + "passive.window_ms";
+	public static final String LIVENESS_PASSIVE_TIMEOUT_MS = LIVENESS_PREFIX + "passive.timeout_ms";
+	public static final String LIVENESS_SAMPLING_MS = LIVENESS_PREFIX + "frame.sampling_ms";
+	public static final String LIVENESS_MIN_FACE_PX = LIVENESS_PREFIX + "quality.min_face_px";
+	public static final String LIVENESS_MAX_YAW_DEG = LIVENESS_PREFIX + "quality.max_yaw_deg";
+	public static final String LIVENESS_ACTIVE_ENABLED = LIVENESS_PREFIX + "active.enabled";
+	public static final String LIVENESS_MIN_CHALLENGES = LIVENESS_PREFIX + "active.min_challenges";
+	public static final String LIVENESS_CHALLENGE_TYPES = LIVENESS_PREFIX + "active.challenge_types";
+	public static final String LIVENESS_CHALLENGE_TIMEOUT_MS = LIVENESS_PREFIX + "active.challenge_timeout_ms";
+	public static final String LIVENESS_BASELINE_MS = LIVENESS_PREFIX + "active.baseline_ms";
+	public static final String LIVENESS_MAX_ATTEMPTS = LIVENESS_PREFIX + "max_attempts";
+	public static final String LIVENESS_ON_MAX_ATTEMPTS = LIVENESS_PREFIX + "on_max_attempts";
+	public static final String LIVENESS_DIAGNOSTIC_ENABLED = LIVENESS_PREFIX + "diagnostic.enabled";
+
 	/*public static final String[] LEFTHAND_SEGMNTD_FILE_PATHS = new String[] { "/fingerprints/lefthand/leftIndex/",
 			"/fingerprints/lefthand/leftLittle/", "/fingerprints/lefthand/leftMiddle/",
 			"/fingerprints/lefthand/leftRing/" };
