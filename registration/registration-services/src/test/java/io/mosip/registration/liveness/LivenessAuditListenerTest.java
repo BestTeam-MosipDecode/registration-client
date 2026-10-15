@@ -1,3 +1,8 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ */
 package io.mosip.registration.liveness;
 
 import static org.junit.Assert.assertEquals;
@@ -54,7 +59,8 @@ public class LivenessAuditListenerTest {
 
 	private final AuditManagerService audit = mock(AuditManagerService.class);
 	private final Screen screen = new Screen();
-	private final LivenessAuditListener listener = new LivenessAuditListener(audit, screen, USER, USER_ID);
+	private final LivenessAuditListener listener = new LivenessAuditListener(audit, screen, USER, USER_ID,
+			Runnable::run);
 
 	private static LivenessEvent event(LivenessEvent.Type type, FailureReason reason, ChallengeType challenge,
 			DeviceEvent device) {
@@ -118,7 +124,7 @@ public class LivenessAuditListenerTest {
 
 	@Test
 	public void worksWithoutAScreenListener() {
-		new LivenessAuditListener(audit, null, USER, USER_ID)
+		new LivenessAuditListener(audit, null, USER, USER_ID, Runnable::run)
 				.onEvent(event(LivenessEvent.Type.PASSED, null, null, null));
 		assertTrue(auditedDetails(AuditEvent.LIVENESS_PASSED).contains("workflow=SUPERVISOR"));
 	}
@@ -138,5 +144,31 @@ public class LivenessAuditListenerTest {
 				assertFalse("id reused by " + auditEvent, ids.contains(auditEvent.getId()));
 			}
 		}
+	}
+
+	@Test
+	public void theWriteNeverHoldsTheEngineAndKeepsTheOrder() {
+		java.util.Deque<Runnable> queued = new java.util.ArrayDeque<>();
+		LivenessAuditListener asynchronous = new LivenessAuditListener(audit, screen, USER, USER_ID, queued::add);
+		asynchronous.onEvent(event(LivenessEvent.Type.SESSION_STARTED, null, null, null));
+		asynchronous.onEvent(event(LivenessEvent.Type.PASSED, null, null, null));
+		org.mockito.Mockito.verifyZeroInteractions(audit);
+		assertEquals("the screen does not wait for the audit", 2, screen.received.size());
+		org.mockito.InOrder order = org.mockito.Mockito.inOrder(audit);
+		while (!queued.isEmpty()) {
+			queued.poll().run();
+		}
+		order.verify(audit).audit(eq(AuditEvent.LIVENESS_SESSION_STARTED), eq(Components.LIVENESS), eq(USER),
+				eq(USER_ID), anyString());
+		order.verify(audit).audit(eq(AuditEvent.LIVENESS_PASSED), eq(Components.LIVENESS), eq(USER), eq(USER_ID),
+				anyString());
+	}
+
+	@Test
+	public void theDefaultWriterIsOneDaemonThread() throws Exception {
+		LivenessAuditListener production = new LivenessAuditListener(audit, null, USER, USER_ID);
+		production.onEvent(event(LivenessEvent.Type.SESSION_STARTED, null, null, null));
+		org.mockito.Mockito.verify(audit, org.mockito.Mockito.timeout(2000)).audit(
+				eq(AuditEvent.LIVENESS_SESSION_STARTED), eq(Components.LIVENESS), eq(USER), eq(USER_ID), anyString());
 	}
 }
