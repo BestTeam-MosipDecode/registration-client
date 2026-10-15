@@ -1,3 +1,8 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ */
 package io.mosip.registration.liveness;
 
 import static org.junit.Assert.assertEquals;
@@ -191,5 +196,18 @@ public class LivenessCaptureTest {
 		assertTrue(capture.isAccepted());
 		capture.close();
 		assertTrue(session.calls.contains("close"));
+	}
+
+	@Test
+	public void exactlyOneFaceRecordIsAccepted() {
+		LivenessCapture capture = capture();
+		assertTrue(capture.checkCaptures(java.util.Collections.singletonList(new byte[] { 1 })).accepted());
+		assertSame(IMAGE, session.checked);
+		session.checked = IMAGE;
+		assertFalse("two records: the second one would be stored unchecked",
+				capture.checkCaptures(java.util.Arrays.asList(new byte[] { 1 }, new byte[] { 2 })).accepted());
+		assertNull("the attempt ends as an invalid capture", session.checked);
+		assertFalse(capture.checkCaptures(java.util.Collections.emptyList()).accepted());
+		assertFalse(capture.checkCaptures(null).accepted());
 	}
 }

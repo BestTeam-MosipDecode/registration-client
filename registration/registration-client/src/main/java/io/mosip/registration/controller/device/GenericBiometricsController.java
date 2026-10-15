@@ -7,6 +7,7 @@ import java.text.MessageFormat;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -548,6 +549,7 @@ public class GenericBiometricsController extends BaseController {
 						return;
 					}
 					if (scanOfSearch != null) {
+						scanOfSearch.stream = urlStream;
 						// The capture request waits for liveness: it is sent when the session reaches PASSED.
 						streamer.setFrameListener(scanOfSearch.capture.frameListener());
 						scanOfSearch.startWatchdog();
@@ -652,7 +654,10 @@ public class GenericBiometricsController extends BaseController {
 		scan.ended = true;
 		livenessScan = null;
 		scan.stopWatchdog();
-		streamer.setUrlStream(null);
+		// Only the scan's own stream: after a logout, the shared streamer may already show another screen's stream.
+		if (scan.stream == null || streamer.getUrlStream() == scan.stream) {
+			streamer.setUrlStream(null);
+		}
 		SessionContext.setAutoLogout(true);
 		scan.control.getNode().setDisable(false);
 		biometric.setDisable(false);
@@ -702,6 +707,7 @@ public class GenericBiometricsController extends BaseController {
 		private volatile CaptureCheck check;
 		private volatile LivenessUpdate lastUpdate;
 		private volatile String refusal;
+		private volatile InputStream stream;
 		private PauseTransition watchdog;
 		private volatile boolean ended;
 
@@ -811,9 +817,16 @@ public class GenericBiometricsController extends BaseController {
 
 						LOGGER.info("Capture request started {}", System.currentTimeMillis());
 						List<BiometricsDto> captured = rCapture(fxControl.getUiSchemaDTO().getId(), currentModality);
-						if (scanOfCapture != null && captured != null && !captured.isEmpty()) {
-							// Check of the captured image against the face followed on the stream, off the UI thread.
-							scanOfCapture.check = scanOfCapture.capture.checkCapture(captured.get(0).getAttributeISO());
+						if (scanOfCapture != null) {
+							// Check of the captured face against the face followed on the stream, off the UI thread:
+							// exactly one record, since every record of the response would be stored.
+							List<byte[]> records = new ArrayList<>();
+							if (captured != null) {
+								for (BiometricsDto record : captured) {
+									records.add(record.getAttributeISO());
+								}
+							}
+							scanOfCapture.check = scanOfCapture.capture.checkCaptures(records);
 						}
 						return captured;
 
@@ -864,7 +877,6 @@ public class GenericBiometricsController extends BaseController {
 								: RegistrationUIConstants.getMessageLanguageSpecific("LIVENESS_GENERIC_FAILURE"));
 						return;
 					}
-					scanOfCapture.attempts.set(0);
 				}
 				try {
 					List<BiometricsDto> mdsCapturedBiometricsList = rCaptureTaskService.getValue();

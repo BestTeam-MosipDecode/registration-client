@@ -1,6 +1,12 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ */
 package io.mosip.registration.liveness;
 
 import java.io.InputStream;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import io.mosip.biometrics.util.ConvertRequestDto;
@@ -129,6 +135,18 @@ public class LivenessCapture implements AutoCloseable {
 			}
 		}
 		return session.checkCapture(image);
+	}
+
+	/**
+	 * Checks the face records returned by RCAPTURE: there must be exactly one, since every record of the response is
+	 * stored and only a checked one may be. Otherwise the attempt ends as an invalid capture.
+	 */
+	public CaptureCheck checkCaptures(List<byte[]> isoRecords) {
+		if (isoRecords == null || isoRecords.size() != 1) {
+			LOGGER.error("Face capture refused: {} face records instead of one", isoRecords == null ? 0 : isoRecords.size());
+			return session.checkCapture((BgrImage) null);
+		}
+		return checkCapture(isoRecords.get(0));
 	}
 
 	/** The captured image was accepted: a new scan needs a new capture. */
