@@ -312,6 +312,23 @@ public enum AuditEvent {
 			"Demographic Details : A blocklisted word has been accepted in Registration"),
 	REG_BLOCKLISTED_WORD_REJECTED("REG-EVT-103", USER_EVENT.getCode(), "REG_BLOCKLISTED_WORD_REJECTED",
 			"Demographic Details : A blocklisted word has been rejected in Registration"),
+
+	// Face liveness, section 9 of docs/decision-flow.md of face-liveness-pad. No score and no image.
+	LIVENESS_SESSION_STARTED("REG-EVT-104", SYSTEM_EVENT.getCode(), "LIVENESS_SESSION_STARTED",
+			"Face liveness: attempt started"),
+	LIVENESS_ACTIVE_TRIGGERED("REG-EVT-105", SYSTEM_EVENT.getCode(), "LIVENESS_ACTIVE_TRIGGERED",
+			"Face liveness: active check started"),
+	LIVENESS_CHALLENGE_PASSED("REG-EVT-106", SYSTEM_EVENT.getCode(), "LIVENESS_CHALLENGE_PASSED",
+			"Face liveness: challenge performed"),
+	LIVENESS_CHALLENGE_FAILED("REG-EVT-107", SYSTEM_EVENT.getCode(), "LIVENESS_CHALLENGE_FAILED",
+			"Face liveness: challenge not performed"),
+	LIVENESS_PASSED("REG-EVT-108", SYSTEM_EVENT.getCode(), "LIVENESS_PASSED",
+			"Face liveness: established, captured image accepted"),
+	LIVENESS_FAILED("REG-EVT-109", SYSTEM_EVENT.getCode(), "LIVENESS_FAILED", "Face liveness: attempt failed"),
+	LIVENESS_MAX_ATTEMPTS("REG-EVT-110", SYSTEM_EVENT.getCode(), "LIVENESS_MAX_ATTEMPTS",
+			"Face liveness: attempts exhausted"),
+	LIVENESS_DEVICE_ERROR("REG-EVT-111", SYSTEM_EVENT.getCode(), "LIVENESS_DEVICE_ERROR",
+			"Face liveness: device error"),
 	
 	CLIENT_UPGRADE_JARS_DOWNLOADED("REG-UPG-001", USER_EVENT.getCode(), "CLIENT_UPGRADE_JARS_DOWNLOADED",
 			"Client Upgrade: Successfully downloaded all the upgrade jars"),
