@@ -46,6 +46,14 @@ public class Streamer {
 		}
 	}
 
+	private static void closeQuietly(InputStream stream) {
+		try {
+			stream.close();
+		} catch (IOException exception) {
+			LOGGER.error("Failed to close the stream", exception);
+		}
+	}
+
 	private void markClosedByClient(InputStream stream) {
 		synchronized (closedStreams) {
 			closedStreams.add(stream);
@@ -146,9 +154,10 @@ public class Streamer {
 
 				setUrlStream(inputStream);
 
-				while (null != urlStream) {
+				// Each thread reads its own stream and stops when the client closes or replaces it.
+				while (urlStream == inputStream && null != inputStream) {
 					try {
-						imageBytes = retrieveNextImage(urlStream);
+						imageBytes = retrieveNextImage(inputStream);
 						notifyFrame(imageBytes);
 						ByteArrayInputStream imageStream = new ByteArrayInputStream(imageBytes);
 						Image img = new Image(imageStream);
@@ -161,7 +170,10 @@ public class Streamer {
 						if (!isClosedByClient(inputStream)) {
 							notifyInterrupted(t);
 						}
-						urlStream = null;
+						closeQuietly(inputStream);
+						if (urlStream == inputStream) {
+							urlStream = null;
+						}
 					}
 				}
 			}

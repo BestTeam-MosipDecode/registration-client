@@ -23,6 +23,7 @@ public class LivenessFrameSource implements StreamFrameListener {
 
 	private final LivenessSession session;
 	private final LongSupplier clock;
+	private volatile boolean captureRequested;
 
 	public LivenessFrameSource(LivenessSession session) {
 		this(session, LivenessFrameSource::monotonicMillis);
@@ -58,9 +59,19 @@ public class LivenessFrameSource implements StreamFrameListener {
 		session.submit(jpeg, clock.getAsLong());
 	}
 
+	/**
+	 * To call when the capture request is sent: the device may then end its stream, which is not an interruption.
+	 * Frames keep going to the session, which follows the face until the captured image is checked.
+	 */
+	public void captureRequested() {
+		captureRequested = true;
+	}
+
 	@Override
 	public void onStreamInterrupted(Throwable cause) {
-		session.deviceEvent(DeviceEvent.STREAM_INTERRUPTED, clock.getAsLong());
+		if (!captureRequested) {
+			session.deviceEvent(DeviceEvent.STREAM_INTERRUPTED, clock.getAsLong());
+		}
 	}
 
 	/** No device found answers {@code UNAVAILABLE}; any other failure to open the stream is a connection failure. */

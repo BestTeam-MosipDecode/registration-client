@@ -137,4 +137,14 @@ public class LivenessFrameSourceTest {
 		assertTrue(second >= first);
 		assertTrue(Math.abs(first - System.nanoTime() / 1_000_000L) < 1000);
 	}
+
+	@Test
+	public void theEndOfTheStreamAfterTheCaptureRequestIsNotReported() {
+		source.captureRequested();
+		source.onStreamInterrupted(new java.io.EOFException("the device ends its stream after RCAPTURE"));
+		byte[] jpeg = { (byte) 0xFF, (byte) 0xD8 };
+		source.onFrame(jpeg);
+		assertEquals(1, session.calls.size());
+		assertEquals("frame@42", session.calls.get(0));
+	}
 }

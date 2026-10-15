@@ -15,6 +15,8 @@ import java.util.concurrent.TimeUnit;
 
 import org.junit.Test;
 
+import javafx.scene.image.ImageView;
+
 import io.mosip.registration.liveness.StreamFrameListener;
 
 /** The streaming thread, the listener and the ways a stream ends. */
@@ -52,6 +54,31 @@ public class StreamerLifecycleTest {
 		out[out.length - 2] = '\r';
 		out[out.length - 1] = '\n';
 		return out;
+	}
+
+	/** Bytes of a device stream that records whether the streamer closed it. */
+	static final class TrackedStream extends java.io.ByteArrayInputStream {
+		volatile boolean closed;
+
+		TrackedStream(byte[] bytes) {
+			super(bytes);
+		}
+
+		@Override
+		public void close() throws IOException {
+			closed = true;
+			super.close();
+		}
+	}
+
+	/** Waits until the streaming thread reads from {@code stream}. */
+	private void awaitReading(java.io.InputStream stream) throws InterruptedException {
+		long deadline = System.currentTimeMillis() + 2000;
+		while (streamer.getUrlStream() != stream && System.currentTimeMillis() < deadline) {
+			Thread.sleep(10);
+		}
+		assertTrue("the streaming thread did not start", streamer.getUrlStream() == stream);
+		Thread.sleep(100);
 	}
 
 	/** Like a socket stream: a blocked read fails as soon as the stream is closed. */
@@ -144,5 +171,58 @@ public class StreamerLifecycleTest {
 		});
 		streamer.notifyFrame(JPEG);
 		streamer.notifyInterrupted(new EOFException());
+	}
+
+	@Test(timeout = 10000)
+	public void aReplacedStreamIsNotAnInterruption() throws Exception {
+		SocketLikeStream first = new SocketLikeStream();
+		streamer.setFrameListener(recorder);
+		streamer.startStream(first, null, null);
+		awaitReading(first);
+		SocketLikeStream second = new SocketLikeStream();
+		streamer.startStream(second, null, null);
+		awaitReading(second);
+		assertTrue("the replaced stream must not be reported", !recorder.interrupted.await(1, TimeUnit.SECONDS));
+		assertTrue("the new stream keeps running", streamer.getUrlStream() == second);
+		streamer.setUrlStream(null);
+	}
+
+	@Test(timeout = 10000)
+	public void severalFramesReachTheListenerAndThePreview() throws Exception {
+		byte[] jpeg = tinyJpeg();
+		byte[] one = part(jpeg);
+		byte[] three = new byte[one.length * 3];
+		for (int i = 0; i < 3; i++) {
+			System.arraycopy(one, 0, three, i * one.length, one.length);
+		}
+		ImageView preview = new ImageView();
+		streamer.setFrameListener(recorder);
+		streamer.startStream(new java.io.ByteArrayInputStream(three), preview, null);
+		assertTrue(recorder.interrupted.await(5, TimeUnit.SECONDS));
+		assertEquals(3, recorder.frames.size());
+		assertTrue(recorder.interruptions.get(0) instanceof EOFException);
+		assertTrue("the preview received the frames", preview.getImage() != null);
+	}
+
+	@Test(timeout = 10000)
+	public void theStreamIsClosedWhenTheDeviceEndsIt() throws Exception {
+		TrackedStream stream = new TrackedStream(part(JPEG));
+		streamer.setFrameListener(recorder);
+		streamer.startStream(stream, new ImageView(), null);
+		assertTrue(recorder.interrupted.await(5, TimeUnit.SECONDS));
+		long deadline = System.currentTimeMillis() + 2000;
+		while (!stream.closed && System.currentTimeMillis() < deadline) {
+			Thread.sleep(10);
+		}
+		assertTrue("the connection must be released", stream.closed);
+	}
+
+	/** A small valid JPEG, so that the preview can decode it. */
+	private static byte[] tinyJpeg() throws IOException {
+		java.awt.image.BufferedImage image = new java.awt.image.BufferedImage(8, 8,
+				java.awt.image.BufferedImage.TYPE_3BYTE_BGR);
+		java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+		javax.imageio.ImageIO.write(image, "jpg", out);
+		return out.toByteArray();
 	}
 }
