@@ -10,6 +10,8 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.ResourceBundle;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -41,9 +43,11 @@ import io.mosip.registration.enums.Modality;
 import io.mosip.registration.exception.RegBaseCheckedException;
 import io.mosip.registration.exception.RegistrationExceptionConstants;
 import io.mosip.registration.liveness.LivenessCapture;
+import io.mosip.registration.liveness.LivenessConfig;
 import io.mosip.registration.liveness.LivenessMessages;
 import io.mosip.registration.liveness.LivenessService;
 import io.mosip.registration.liveness.api.CaptureCheck;
+import io.mosip.registration.liveness.api.FeedbackCode;
 import io.mosip.registration.liveness.api.LivenessUpdate;
 import io.mosip.registration.liveness.api.ModelIntegrityException;
 import io.mosip.registration.liveness.api.SessionState;
@@ -56,6 +60,7 @@ import io.mosip.registration.service.BaseService;
 import io.mosip.registration.service.bio.BioService;
 import io.mosip.registration.util.control.FxControl;
 import io.mosip.registration.util.control.impl.BiometricFxControl;
+import javafx.animation.PauseTransition;
 import javafx.application.Platform;
 import javafx.concurrent.Service;
 import javafx.concurrent.Task;
@@ -200,11 +205,12 @@ public class GenericBiometricsController extends BaseController {
 	@Autowired
 	private LivenessService livenessService;
 
-	// Face liveness of the resident capture: one capture per registration and field, kept between two scans so that
-	// the attempts are counted; livenessCapture is the one of the scan in progress, null without liveness.
-	private final Map<String, LivenessCapture> livenessCaptures = new ConcurrentHashMap<>();
-	private volatile LivenessCapture livenessCapture;
-	private volatile CaptureCheck livenessCaptureCheck;
+	// Face liveness of the resident capture. Each scan runs on a new session of the engine (one attempt); the attempts
+	// are counted per field of the registration in progress. Callbacks and tasks of a scan do nothing once it is no
+	// longer livenessScan.
+	private Object livenessRegistration;
+	private final Map<String, AtomicInteger> livenessAttempts = new ConcurrentHashMap<>();
+	private volatile LivenessScan livenessScan;
 
 	@Autowired
 	private UserDetailDAO userDetailDAO;
@@ -453,11 +459,13 @@ public class GenericBiometricsController extends BaseController {
 
 		disableEnableBiometricPane(true);
 
-		livenessCapture = null;
-		if (isFace(currentModality) && !prepareLiveness()) {
+		// A new scan, of this field or another one, ends the liveness scan in progress.
+		endLivenessScan(livenessScan, null);
+		if (isFace(currentModality) && !prepareLivenessScan()) {
 			disableEnableBiometricPane(false);
 			return;
 		}
+		final LivenessScan scanOfSearch = livenessScan;
 
 		deviceSearchTask = new Service<MdmBioDevice>() {
 			@Override
@@ -477,6 +485,7 @@ public class GenericBiometricsController extends BaseController {
 						 MdmBioDevice bioDevice =deviceSpecificationFactory.getDeviceInfoByModality(modality);
 
 						    if (deviceSpecificationFactory.isDeviceAvailable(bioDevice)) {
+								startLivenessSession(scanOfSearch);
 	                            return bioDevice;
 	                        } else {
 	                            throw new RegBaseCheckedException(
@@ -494,39 +503,50 @@ public class GenericBiometricsController extends BaseController {
 			@Override
 			public void handle(WorkerStateEvent t) {
 				MdmBioDevice mdmBioDevice = deviceSearchTask.getValue();
+				if (scanOfSearch != null && (scanOfSearch != livenessScan || scanOfSearch.capture == null)) {
+					// Ended meanwhile, or the liveness engine could not start: the capture is refused.
+					endLivenessScan(scanOfSearch, RegistrationUIConstants.getMessageLanguageSpecific("LIVENESS_GENERIC_FAILURE"));
+					disableEnableBiometricPane(false);
+					return;
+				}
 				try {
 					// Disable Auto-Logout
 					SessionContext.setAutoLogout(false);
 
 					if (mdmBioDevice == null) {
+						endLivenessScan(scanOfSearch, null);
 						generateAlert(RegistrationConstants.ERROR, RegistrationUIConstants.getMessageLanguageSpecific(RegistrationUIConstants.NO_DEVICE_FOUND));
 						return;
 					}
 
 					String streamModality = isFace(currentModality) ? RegistrationConstants.FACE_FULLFACE
 							: currentModality.name();
-					InputStream urlStream = livenessCapture != null
-							? livenessCapture.open(() -> bioService.getStream(mdmBioDevice, streamModality))
+					InputStream urlStream = scanOfSearch != null
+							? scanOfSearch.capture.open(() -> bioService.getStream(mdmBioDevice, streamModality))
 							: bioService.getStream(mdmBioDevice, streamModality);
 
 					boolean isStreamStarted = urlStream != null && urlStream.read() != -1;
 					if (!isStreamStarted) {
 						LOGGER.info("URL Stream was null at : {} ", System.currentTimeMillis());
 						deviceSpecificationFactory.initializeDeviceMap(true);
+						endLivenessScan(scanOfSearch, null);
 						streamer.setUrlStream(null);
 						generateAlert(RegistrationConstants.ERROR, RegistrationUIConstants.getMessageLanguageSpecific(RegistrationUIConstants.STREAMING_ERROR));
 						return;
 					}
-					if (livenessCapture != null) {
+					if (scanOfSearch != null) {
 						// The capture request waits for liveness: it is sent when the session reaches PASSED.
-						streamer.setFrameListener(livenessCapture.frameListener());
+						streamer.setFrameListener(scanOfSearch.capture.frameListener());
+						scanOfSearch.startWatchdog();
 					} else {
+						streamer.setFrameListener(null);
 						rCaptureTaskService();
 					}
 					streamer.startStream(urlStream, biometricImage, biometricImage);
 
 				} catch (RegBaseCheckedException | IOException exception) {
 					LOGGER.error("Error while streaming : " + currentModality,  exception);
+					endLivenessScan(scanOfSearch, null);
 					generateAlert(RegistrationConstants.ERROR, RegistrationUIConstants.getMessageLanguageSpecific(RegistrationUIConstants.STREAMING_ERROR));
 
 					// Enable Auto-Logout
@@ -542,6 +562,7 @@ public class GenericBiometricsController extends BaseController {
 			@Override
 			public void handle(WorkerStateEvent t) {
 				generateAlert(RegistrationConstants.ERROR, RegistrationUIConstants.getMessageLanguageSpecific(RegistrationUIConstants.NO_DEVICE_FOUND));
+				endLivenessScan(scanOfSearch, null);
 				streamer.setUrlStream(null);
 				disableEnableBiometricPane(false);
 			}
@@ -550,72 +571,69 @@ public class GenericBiometricsController extends BaseController {
 	}
 
 	/**
-	 * Face liveness before a resident face scan. Returns false when the scan must not go on: attempts exhausted with
-	 * the BLOCK policy, or liveness engine unavailable. Leaves livenessCapture null when liveness is disabled or when
-	 * the exception process applies.
+	 * Face liveness before a resident face scan, on the UI thread: reads the settings and the attempts used. Returns
+	 * false when the scan must not go on. Sets livenessScan when the scan runs with liveness.
 	 */
-	private boolean prepareLiveness() {
-		String registrationId = String.valueOf(getRegistrationDTOFromSession().getRegistrationId());
-		String key = registrationId + "_" + fxControl.getUiSchemaDTO().getId();
-		LivenessCapture capture = livenessCaptures.get(key);
-		try {
-			if (capture == null || capture.isAccepted()) {
-				if (capture != null) {
-					capture.close();
-				}
-				capture = livenessService.start(Workflow.RESIDENT, registrationId,
-						AuditReferenceIdTypes.REGISTRATION_ID.getReferenceTypeId(), livenessCallbacks());
-				if (capture == null) {
-					livenessCaptures.remove(key);
-					return true;
-				}
-				livenessCaptures.put(key, capture);
-			}
-		} catch (ModelIntegrityException | RuntimeException exception) {
-			LOGGER.error("Face liveness engine unavailable, face capture refused", exception);
-			generateAlert(RegistrationConstants.ERROR,
-					RegistrationUIConstants.getMessageLanguageSpecific("LIVENESS_GENERIC_FAILURE"));
-			return false;
+	private boolean prepareLivenessScan() {
+		if (livenessRegistration != getRegistrationDTOFromSession()) {
+			// A new registration: the attempts of the previous one are forgotten.
+			livenessRegistration = getRegistrationDTOFromSession();
+			livenessAttempts.clear();
 		}
-		switch (capture.nextScan()) {
-		case BLOCKED:
-			generateAlert(RegistrationConstants.ERROR, livenessMessage(capture.current()));
-			return false;
-		case EXCEPTION:
-			generateAlert(RegistrationConstants.ALERT_INFORMATION,
-					RegistrationUIConstants.getMessageLanguageSpecific("LIVENESS_EXCEPTION_INFO"));
+		LivenessConfig config = livenessService.config(Workflow.RESIDENT);
+		AtomicInteger attempts = livenessAttempts.computeIfAbsent(fxControl.getUiSchemaDTO().getId(),
+				id -> new AtomicInteger());
+		switch (LivenessService.decide(config, attempts.get())) {
+		case DISABLED:
+			return true;
+		case LIVENESS:
+			livenessScan = new LivenessScan(config, attempts, fxControl);
 			return true;
 		default:
-			livenessCapture = capture;
-			return true;
+			// EXCEPTION is refused like BLOCK until the exception mark of the packet and the supervisor
+			// authentication at submission exist (decision-flow 7.1, question Q15 to the mentors).
+			generateAlert(RegistrationConstants.ERROR,
+					RegistrationUIConstants.getMessageLanguageSpecific("LIVENESS_MAX_ATTEMPTS"));
+			return false;
 		}
 	}
 
-	private LivenessCapture.Callbacks livenessCallbacks() {
-		return new LivenessCapture.Callbacks() {
-			@Override
-			public void onUpdate(LivenessUpdate update) {
-				if (update.state() == SessionState.FAILED) {
-					Platform.runLater(() -> {
-						streamer.setUrlStream(null);
-						SessionContext.setAutoLogout(true);
-						disableEnableBiometricPane(false);
-						generateAlert(RegistrationConstants.ERROR, livenessMessage(update));
-					});
-				}
-			}
+	/** Opens the session of the scan, off the UI thread (the engine checks and loads its models on first use). */
+	private void startLivenessSession(LivenessScan scan) {
+		if (scan == null) {
+			return;
+		}
+		try {
+			scan.capture = livenessService.startScan(scan.config, scan.attempts.get(),
+					String.valueOf(getRegistrationDTOFromSession().getRegistrationId()),
+					AuditReferenceIdTypes.REGISTRATION_ID.getReferenceTypeId(), scan);
+		} catch (ModelIntegrityException | RuntimeException exception) {
+			LOGGER.error("Face liveness engine unavailable, face capture refused", exception);
+		}
+	}
 
-			@Override
-			public void onPassed() {
-				Platform.runLater(() -> {
-					LivenessCapture capture = livenessCapture;
-					if (capture != null) {
-						capture.captureRequested();
-						rCaptureTaskService();
-					}
-				});
-			}
-		};
+	/**
+	 * Ends a liveness scan on the UI thread, once: stops the stream, enables the pane of its field, shows the message.
+	 * An attempt still in progress ends as an interruption and counts; the session is closed off the UI thread.
+	 */
+	private void endLivenessScan(LivenessScan scan, String message) {
+		if (scan == null || scan != livenessScan || scan.ended) {
+			return;
+		}
+		scan.ended = true;
+		livenessScan = null;
+		scan.stopWatchdog();
+		streamer.setUrlStream(null);
+		SessionContext.setAutoLogout(true);
+		scan.control.getNode().setDisable(false);
+		biometric.setDisable(false);
+		LivenessCapture capture = scan.capture;
+		if (capture != null) {
+			new Thread(capture::abort, "liveness-end").start();
+		}
+		if (message != null) {
+			generateAlert(RegistrationConstants.ERROR, message);
+		}
 	}
 
 	private String livenessMessage(LivenessUpdate update) {
@@ -631,6 +649,74 @@ public class GenericBiometricsController extends BaseController {
 			message.append(text);
 		}
 		return message.toString();
+	}
+
+	/** One resident face scan gated on liveness: one session of the engine, one attempt. */
+	private final class LivenessScan implements LivenessCapture.Callbacks {
+
+		private final LivenessConfig config;
+		private final AtomicInteger attempts;
+		private final BiometricFxControl control;
+		private final AtomicBoolean counted = new AtomicBoolean();
+		private volatile LivenessCapture capture;
+		private volatile CaptureCheck check;
+		private PauseTransition watchdog;
+		private boolean ended;
+
+		private LivenessScan(LivenessConfig config, AtomicInteger attempts, BiometricFxControl control) {
+			this.config = config;
+			this.attempts = attempts;
+			this.control = control;
+		}
+
+		@Override
+		public void onUpdate(LivenessUpdate update) {
+			// Counted on the engine thread, so that an attempt ended by abort() after the scan counts too.
+			if (update.state() == SessionState.FAILED && counted.compareAndSet(false, true)) {
+				attempts.incrementAndGet();
+			}
+			if (update.state() == SessionState.FAILED || update.feedback() == FeedbackCode.DEVICE_ERROR) {
+				Platform.runLater(() -> {
+					// During the capture request, the RCAPTURE handlers end the scan after the image check.
+					if (capture != null && !capture.isCaptureRequested()) {
+						endLivenessScan(this, livenessMessage(update));
+					}
+				});
+			}
+		}
+
+		@Override
+		public void onPassed() {
+			Platform.runLater(() -> {
+				LivenessUpdate current = capture.current();
+				if (livenessScan != this || ended || current.state() != SessionState.PASSED || current.finished()) {
+					return;
+				}
+				stopWatchdog();
+				capture.captureRequested();
+				rCaptureTaskService();
+			});
+		}
+
+		/**
+		 * Engine timeouts follow the frames: a device that stops sending frames would leave the scan open. Bound
+		 * the whole check: passive timeout, every challenge, and a margin.
+		 */
+		private void startWatchdog() {
+			long limitMs = config.getPolicy().passiveTimeoutMs()
+					+ config.getPolicy().minChallenges() * config.getPolicy().challengeTimeoutMs() + 15000;
+			watchdog = new PauseTransition(javafx.util.Duration.millis(limitMs));
+			// No message once the screen has been left, for example after a logout that stopped the stream.
+			watchdog.setOnFinished(event -> endLivenessScan(this, control.getNode().getScene() == null ? null
+					: RegistrationUIConstants.getMessageLanguageSpecific("LIVENESS_DEVICE_UNAVAILABLE")));
+			watchdog.play();
+		}
+
+		private void stopWatchdog() {
+			if (watchdog != null) {
+				watchdog.stop();
+			}
+		}
 	}
 
 	private void disableEnableBiometricPane(boolean flag) {
@@ -666,6 +752,7 @@ public class GenericBiometricsController extends BaseController {
 
 	public void rCaptureTaskService() {
 		LOGGER.debug("Capture request called at : {}", System.currentTimeMillis());
+		final LivenessScan scanOfCapture = livenessScan;
 
 		rCaptureTaskService = new Service<List<BiometricsDto>>() {
 			@Override
@@ -681,11 +768,10 @@ public class GenericBiometricsController extends BaseController {
 
 						LOGGER.info("Capture request started {}", System.currentTimeMillis());
 						List<BiometricsDto> captured = rCapture(fxControl.getUiSchemaDTO().getId(), currentModality);
-						// Check of the captured image against the face followed on the stream, off the UI thread.
-						LivenessCapture capture = livenessCapture;
-						livenessCaptureCheck = capture != null && captured != null && !captured.isEmpty()
-								? capture.checkCapture(captured.get(0).getAttributeISO())
-								: null;
+						if (scanOfCapture != null && captured != null && !captured.isEmpty()) {
+							// Check of the captured image against the face followed on the stream, off the UI thread.
+							scanOfCapture.check = scanOfCapture.capture.checkCapture(captured.get(0).getAttributeISO());
+						}
 						return captured;
 
 					}
@@ -698,8 +784,10 @@ public class GenericBiometricsController extends BaseController {
 			@Override
 			public void handle(WorkerStateEvent t) {
 				LOGGER.debug("RCapture task failed");
-				if (livenessCapture != null) {
-					livenessCapture.captureFailed();
+				if (scanOfCapture != null) {
+					// The attempt ends: the capture request could not complete.
+					endLivenessScan(scanOfCapture, RegistrationUIConstants.getMessageLanguageSpecific(RegistrationUIConstants.BIOMETRIC_SCANNING_ERROR));
+					return;
 				}
 				generateAlert(RegistrationConstants.ERROR, RegistrationUIConstants.getMessageLanguageSpecific(RegistrationUIConstants.BIOMETRIC_SCANNING_ERROR));
 
@@ -719,13 +807,23 @@ public class GenericBiometricsController extends BaseController {
 			public void handle(WorkerStateEvent t) {
 
 				LOGGER.debug("RCapture task was successful");
-				try {
-					List<BiometricsDto> mdsCapturedBiometricsList = rCaptureTaskService.getValue();
-					if (livenessCapture != null && (livenessCaptureCheck == null || !livenessCaptureCheck.accepted())) {
-						// The attempt failed: the listener of the session shows the message.
-						LOGGER.info("Captured face refused by the liveness check: {}", livenessCaptureCheck);
+				if (scanOfCapture != null) {
+					if (scanOfCapture != livenessScan) {
 						return;
 					}
+					CaptureCheck check = scanOfCapture.check;
+					if (check == null || !check.accepted()) {
+						LivenessUpdate current = scanOfCapture.capture.current();
+						LOGGER.info("Captured face refused by the liveness check: {}", check);
+						endLivenessScan(scanOfCapture, check != null && current.state() == SessionState.FAILED
+								? livenessMessage(current)
+								: RegistrationUIConstants.getMessageLanguageSpecific("LIVENESS_GENERIC_FAILURE"));
+						return;
+					}
+					scanOfCapture.attempts.set(0);
+				}
+				try {
+					List<BiometricsDto> mdsCapturedBiometricsList = rCaptureTaskService.getValue();
 					boolean isValidBiometric = isValidBiometric(mdsCapturedBiometricsList);
 					LOGGER.debug("biometrics captured from mock/real MDM was valid : {}", isValidBiometric);
 
@@ -778,6 +876,7 @@ public class GenericBiometricsController extends BaseController {
 					streamer.setUrlStream(null);
 
 					disableEnableBiometricPane(false);
+					endLivenessScan(scanOfCapture, null);
 				}
 			}
 		});

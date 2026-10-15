@@ -12,13 +12,10 @@ import java.util.List;
 
 import org.junit.Test;
 
-import io.mosip.registration.liveness.LivenessCapture.ScanDecision;
-import io.mosip.registration.liveness.LivenessConfig.OnMaxAttempts;
 import io.mosip.registration.liveness.api.CaptureCheck;
 import io.mosip.registration.liveness.api.DeviceEvent;
 import io.mosip.registration.liveness.api.FailureReason;
 import io.mosip.registration.liveness.api.FeedbackCode;
-import io.mosip.registration.liveness.api.LivenessPolicy;
 import io.mosip.registration.liveness.api.LivenessSession;
 import io.mosip.registration.liveness.api.LivenessUpdate;
 import io.mosip.registration.liveness.api.SessionState;
@@ -105,9 +102,8 @@ public class LivenessCaptureTest {
 	private final FakeSession session = new FakeSession();
 	private final Screen screen = new Screen();
 
-	private LivenessCapture capture(OnMaxAttempts onMaxAttempts) {
-		LivenessConfig config = new LivenessConfig(Workflow.RESIDENT, true, onMaxAttempts, LivenessPolicy.defaults());
-		LivenessCapture capture = new LivenessCapture(config, screen, iso -> {
+	private LivenessCapture capture() {
+		LivenessCapture capture = new LivenessCapture(screen, iso -> {
 			if (iso.length == 0) {
 				throw new IllegalArgumentException("not an ISO 19794-5 record");
 			}
@@ -118,76 +114,44 @@ public class LivenessCaptureTest {
 	}
 
 	@Test
-	public void theFirstScanStartsTheFirstAttempt() {
-		LivenessCapture capture = capture(OnMaxAttempts.EXCEPTION);
-		assertEquals(ScanDecision.LIVENESS, capture.nextScan());
-		assertFalse(session.calls.contains("retry"));
-	}
-
-	@Test
-	public void aScanAfterAFailedAttemptStartsANewOne() {
-		LivenessCapture capture = capture(OnMaxAttempts.EXCEPTION);
-		capture.nextScan();
-		session.current = update(SessionState.FAILED, FeedbackCode.FAILED, FailureReason.CHALLENGE_TIMEOUT, true,
-				false);
-		assertEquals(ScanDecision.LIVENESS, capture.nextScan());
-		assertTrue(session.calls.contains("retry"));
-	}
-
-	@Test
-	public void exhaustedAttemptsFollowThePolicy() {
-		LivenessUpdate exhausted = update(SessionState.FAILED, FeedbackCode.MAX_ATTEMPTS_EXCEEDED,
-				FailureReason.PAD_ATTACK_DETECTED, false, true);
-		LivenessCapture resident = capture(OnMaxAttempts.EXCEPTION);
-		session.current = exhausted;
-		assertEquals(ScanDecision.EXCEPTION, resident.nextScan());
-		LivenessCapture blocked = capture(OnMaxAttempts.BLOCK);
-		assertEquals(ScanDecision.BLOCKED, blocked.nextScan());
-	}
-
-	@Test
-	public void eachScanHasItsOwnFrameSource() {
-		LivenessCapture capture = capture(OnMaxAttempts.EXCEPTION);
-		capture.nextScan();
-		capture.captureRequested();
-		capture.frameListener().onStreamInterrupted(new EOFException());
-		assertFalse("the end of the stream after RCAPTURE is not reported",
-				session.calls.contains("STREAM_INTERRUPTED"));
-		session.current = update(SessionState.FAILED, FeedbackCode.FAILED, FailureReason.CHALLENGE_FAILED, true,
-				false);
-		capture.nextScan();
-		capture.frameListener().onStreamInterrupted(new EOFException());
-		assertTrue(session.calls.contains("STREAM_INTERRUPTED"));
+	public void framesAndInterruptionsGoToTheSession() {
+		LivenessCapture capture = capture();
 		capture.frameListener().onFrame(new byte[] { 1 });
+		capture.frameListener().onStreamInterrupted(new EOFException());
 		assertTrue(session.calls.contains("frame"));
+		assertTrue(session.calls.contains("STREAM_INTERRUPTED"));
 	}
 
 	@Test
-	public void thePassIsAnnouncedOncePerAttempt() {
-		LivenessCapture capture = capture(OnMaxAttempts.EXCEPTION);
-		capture.nextScan();
+	public void theEndOfTheStreamAfterTheCaptureRequestIsNotReported() {
+		LivenessCapture capture = capture();
+		assertFalse(capture.isCaptureRequested());
+		capture.captureRequested();
+		assertTrue(capture.isCaptureRequested());
+		capture.frameListener().onStreamInterrupted(new EOFException());
+		assertFalse(session.calls.contains("STREAM_INTERRUPTED"));
+	}
+
+	@Test
+	public void thePassIsAnnouncedOnce() {
+		LivenessCapture capture = capture();
 		LivenessUpdate passed = update(SessionState.PASSED, FeedbackCode.HOLD_STILL, null, false, false);
 		capture.listener().onUpdate(passed);
 		capture.listener().onUpdate(passed);
 		assertEquals(1, screen.passed);
 		assertEquals(2, screen.updates.size());
-		session.current = update(SessionState.FAILED, FeedbackCode.FAILED, FailureReason.FACE_CONTINUITY_LOST, true,
-				false);
-		capture.nextScan();
-		capture.listener().onUpdate(passed);
-		assertEquals(2, screen.passed);
 	}
 
 	@Test
 	public void theCapturedRecordIsConvertedThenChecked() {
-		LivenessCapture capture = capture(OnMaxAttempts.EXCEPTION);
+		LivenessCapture capture = capture();
 		assertTrue(capture.checkCapture(new byte[] { 1, 2, 3 }).accepted());
 		assertSame(IMAGE, session.checked);
 	}
 
 	@Test
 	public void aRecordThatCannotBeConvertedIsRefused() {
-		LivenessCapture capture = capture(OnMaxAttempts.EXCEPTION);
+		LivenessCapture capture = capture();
 		CaptureCheck check = capture.checkCapture(new byte[0]);
 		assertFalse(check.accepted());
 		assertNull(session.checked);
@@ -195,16 +159,32 @@ public class LivenessCaptureTest {
 	}
 
 	@Test
-	public void aFailedCaptureRequestEndsTheAttempt() {
-		LivenessCapture capture = capture(OnMaxAttempts.EXCEPTION);
-		capture.nextScan();
-		capture.captureFailed();
-		assertTrue(session.calls.contains("CONNECTION_FAILED"));
+	public void abortingEndsAnAttemptInProgressBeforeClosing() {
+		LivenessCapture capture = capture();
+		session.current = update(SessionState.ACTIVE_CHALLENGE, FeedbackCode.CHALLENGE, null, false, false);
+		assertTrue(capture.abort());
+		assertEquals(java.util.Arrays.asList("STREAM_INTERRUPTED", "retry", "close"), session.calls);
+	}
+
+	@Test
+	public void abortingBeforeAnyFrameUsesNoAttempt() {
+		LivenessCapture capture = capture();
+		assertFalse(capture.abort());
+		assertEquals(java.util.Collections.singletonList("close"), session.calls);
+	}
+
+	@Test
+	public void abortingAfterTheEndOfTheAttemptOnlyCloses() {
+		LivenessCapture capture = capture();
+		session.current = update(SessionState.FAILED, FeedbackCode.FAILED, FailureReason.CHALLENGE_TIMEOUT, true,
+				false);
+		assertFalse(capture.abort());
+		assertEquals(java.util.Collections.singletonList("close"), session.calls);
 	}
 
 	@Test
 	public void anAcceptedCaptureIsReported() {
-		LivenessCapture capture = capture(OnMaxAttempts.EXCEPTION);
+		LivenessCapture capture = capture();
 		assertFalse(capture.isAccepted());
 		session.current = new LivenessUpdate(SessionState.PASSED, FeedbackCode.SUCCESS, null, null, 1, 1, 3, null,
 				false, true, null);

@@ -19,23 +19,13 @@ import io.mosip.registration.liveness.image.BgrImage;
 import io.mosip.registration.liveness.platform.desktop.ImageIoFrameDecoder;
 
 /**
- * One face capture or authentication gated on liveness. Its session keeps the attempt count between two scans; each
- * scan gets its own frame source. The screen is told when liveness is established, once per attempt, and only then
- * sends the capture request (decision-flow sections 6 and 7).
+ * One scan gated on liveness: one session of the engine, one attempt. The attempts are counted across scans by the
+ * client and the session only gets the attempts left (see {@link LivenessService}). The screen is told when liveness
+ * is established, once, and only then sends the capture request (decision-flow sections 6 and 7).
  */
 public class LivenessCapture implements AutoCloseable {
 
 	private static final Logger LOGGER = AppConfig.getLogger(LivenessCapture.class);
-
-	/** What the next scan does. */
-	public enum ScanDecision {
-		/** Run the liveness check, a new attempt after a failed one. */
-		LIVENESS,
-		/** Attempts exhausted, resident: capture once more without a liveness decision (exception process). */
-		EXCEPTION,
-		/** Attempts exhausted: no face is accepted. */
-		BLOCKED
-	}
 
 	/** Screen side. Both methods are called on the thread of the engine: move to the UI thread before any UI work. */
 	public interface Callbacks {
@@ -52,7 +42,6 @@ public class LivenessCapture implements AutoCloseable {
 		BgrImage convert(byte[] isoRecord) throws Exception;
 	}
 
-	private final LivenessConfig config;
 	private final Callbacks screen;
 	private final ImageConverter converter;
 	private final AtomicBoolean passAnnounced = new AtomicBoolean();
@@ -68,9 +57,9 @@ public class LivenessCapture implements AutoCloseable {
 	};
 	private volatile LivenessSession session;
 	private volatile LivenessFrameSource frameSource;
+	private volatile boolean captureRequested;
 
-	public LivenessCapture(LivenessConfig config, Callbacks screen, ImageConverter converter) {
-		this.config = config;
+	public LivenessCapture(Callbacks screen, ImageConverter converter) {
 		this.screen = screen;
 		this.converter = converter;
 	}
@@ -85,25 +74,6 @@ public class LivenessCapture implements AutoCloseable {
 		this.frameSource = new LivenessFrameSource(session);
 	}
 
-	public LivenessConfig getConfig() {
-		return config;
-	}
-
-	/** To call on each scan, before the stream is opened. */
-	public ScanDecision nextScan() {
-		LivenessUpdate current = session.current();
-		if (current.feedback() == FeedbackCode.MAX_ATTEMPTS_EXCEEDED) {
-			return config.getOnMaxAttempts() == LivenessConfig.OnMaxAttempts.EXCEPTION ? ScanDecision.EXCEPTION
-					: ScanDecision.BLOCKED;
-		}
-		if (current.state() == SessionState.FAILED && current.retryAvailable()) {
-			session.retry();
-		}
-		passAnnounced.set(false);
-		frameSource = new LivenessFrameSource(session);
-		return ScanDecision.LIVENESS;
-	}
-
 	/** Opens the device stream; a failure is reported to the session, then thrown as before. */
 	public InputStream open(LivenessFrameSource.StreamOpener opener) throws RegBaseCheckedException {
 		return frameSource.open(opener);
@@ -116,12 +86,33 @@ public class LivenessCapture implements AutoCloseable {
 
 	/** To call when the capture request is sent: the end of the stream is then no longer an interruption. */
 	public void captureRequested() {
+		captureRequested = true;
 		frameSource.captureRequested();
 	}
 
-	/** The capture request failed: the attempt ends with a device error. */
-	public void captureFailed() {
-		session.deviceEvent(DeviceEvent.CONNECTION_FAILED, LivenessFrameSource.monotonicMillis());
+	public boolean isCaptureRequested() {
+		return captureRequested;
+	}
+
+	/**
+	 * Ends the scan. An attempt still in progress (stream stopped, capture request failed, scan abandoned) ends as an
+	 * interruption of the stream and counts, as section 7 of the decision flow asks; then the session is closed. Waits
+	 * for the engine: call it off the UI thread.
+	 *
+	 * @return true when an attempt was in progress
+	 */
+	public boolean abort() {
+		LivenessUpdate current = session.current();
+		boolean inProgress = current.state() != SessionState.INIT && current.state() != SessionState.FAILED
+				&& !current.finished();
+		if (inProgress) {
+			session.deviceEvent(DeviceEvent.STREAM_INTERRUPTED, LivenessFrameSource.monotonicMillis());
+			// retry() runs on the worker after the event above: it returns once the attempt has failed and its
+			// listeners (screen, audit) have been called. The session is closed right after.
+			session.retry();
+		}
+		session.close();
+		return inProgress;
 	}
 
 	/**

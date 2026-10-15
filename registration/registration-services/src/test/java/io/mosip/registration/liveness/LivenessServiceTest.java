@@ -1,11 +1,10 @@
 package io.mosip.registration.liveness;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Matchers.any;
 import static org.mockito.Matchers.eq;
-import static org.mockito.Matchers.same;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -18,6 +17,7 @@ import org.mockito.ArgumentCaptor;
 
 import io.mosip.registration.audit.AuditManagerService;
 import io.mosip.registration.constants.RegistrationConstants;
+import io.mosip.registration.liveness.LivenessService.ScanDecision;
 import io.mosip.registration.liveness.api.LivenessEngine;
 import io.mosip.registration.liveness.api.LivenessEventListener;
 import io.mosip.registration.liveness.api.LivenessPolicy;
@@ -26,35 +26,74 @@ import io.mosip.registration.liveness.api.Workflow;
 
 public class LivenessServiceTest {
 
+	private static final String P = RegistrationConstants.LIVENESS_PREFIX;
+
 	private final Map<String, String> settings = new HashMap<>();
 	private final LivenessEngine engine = mock(LivenessEngine.class);
-	private int enginesCreated;
 	private final LivenessService service = new LivenessService(new LivenessConfigProvider(settings::get),
-			new LivenessEngineProvider(() -> {
-				enginesCreated++;
-				return engine;
-			}), mock(AuditManagerService.class));
+			new LivenessEngineProvider(() -> engine), mock(AuditManagerService.class));
 	private final LivenessCapture.Callbacks screen = mock(LivenessCapture.Callbacks.class);
 
 	@Test
-	public void noCaptureWhenLivenessIsDisabledForTheWorkflow() throws Exception {
-		settings.put(RegistrationConstants.LIVENESS_PREFIX + "resident.enabled", "N");
-		assertNull(service.start(Workflow.RESIDENT, "10001", "REGISTRATION_ID", screen));
-		assertTrue("the engine is not even loaded", enginesCreated == 0);
+	public void decidesFromTheAttemptsAlreadyUsed() {
+		LivenessConfig resident = service.config(Workflow.RESIDENT);
+		assertEquals(ScanDecision.LIVENESS, LivenessService.decide(resident, 0));
+		assertEquals(ScanDecision.LIVENESS, LivenessService.decide(resident, 2));
+		assertEquals(ScanDecision.EXCEPTION, LivenessService.decide(resident, 3));
+		assertEquals(ScanDecision.BLOCKED, LivenessService.decide(service.config(Workflow.OPERATOR), 3));
+		settings.put(P + "resident.enabled", "N");
+		assertEquals(ScanDecision.DISABLED, LivenessService.decide(service.config(Workflow.RESIDENT), 5));
 	}
 
 	@Test
-	public void aCaptureRunsOnASessionOfTheEngineWithTheAuditListener() throws Exception {
+	public void aScanRunsOnANewSessionWithTheAttemptsLeftAndTheAuditListener() throws Exception {
 		LivenessSession session = mock(LivenessSession.class);
 		when(engine.newSession(eq(Workflow.RESIDENT), any(LivenessPolicy.class), any(LivenessEventListener.class)))
 				.thenReturn(session);
-		LivenessCapture capture = service.start(Workflow.RESIDENT, "10001", "REGISTRATION_ID", screen);
+		LivenessCapture capture = service.startScan(service.config(Workflow.RESIDENT), 1, "10001", "REGISTRATION_ID",
+				screen);
 		assertNotNull(capture);
+		ArgumentCaptor<LivenessPolicy> policy = ArgumentCaptor.forClass(LivenessPolicy.class);
 		ArgumentCaptor<LivenessEventListener> listener = ArgumentCaptor.forClass(LivenessEventListener.class);
-		verify(engine).newSession(eq(Workflow.RESIDENT), any(LivenessPolicy.class), listener.capture());
-		assertTrue(listener.getValue() instanceof LivenessAuditListener);
+		verify(engine).newSession(eq(Workflow.RESIDENT), policy.capture(), listener.capture());
+		assertEquals(2, policy.getValue().maxAttempts());
+		assertEquals(LivenessPolicy.defaults().passThreshold(), policy.getValue().passThreshold(), 0);
+		assertTrue(listener.getValue() instanceof AttemptOffsetListener);
 		capture.close();
 		verify(session).close();
-		verify(engine).newSession(same(Workflow.RESIDENT), any(LivenessPolicy.class), any(LivenessEventListener.class));
+	}
+
+	@Test
+	public void keepsEveryOtherValueOfThePolicy() {
+		LivenessPolicy original = LivenessPolicy.builder().passThreshold(0.9).attackThreshold(0.2).minFrames(7)
+				.windowMs(4000).samplingMs(50).minFacePx(100).maxYawDeg(15).activeEnabled(false).minChallenges(3)
+				.challengeTimeoutMs(9000).baselineMs(700).maxAttempts(5).passiveTimeoutMs(15000).diagnostic(true)
+				.build();
+		LivenessPolicy copy = LivenessService.withMaxAttempts(original, 2);
+		assertEquals(2, copy.maxAttempts());
+		assertEquals(0.9, copy.passThreshold(), 0);
+		assertEquals(0.2, copy.attackThreshold(), 0);
+		assertEquals(7, copy.minFrames());
+		assertEquals(4000, copy.windowMs());
+		assertEquals(50, copy.samplingMs());
+		assertEquals(100, copy.minFacePx());
+		assertEquals(15, copy.maxYawDeg(), 0);
+		assertEquals(false, copy.activeEnabled());
+		assertEquals(3, copy.minChallenges());
+		assertEquals(original.challengeTypes(), copy.challengeTypes());
+		assertEquals(9000, copy.challengeTimeoutMs());
+		assertEquals(700, copy.baselineMs());
+		assertEquals(15000, copy.passiveTimeoutMs());
+		assertEquals(true, copy.diagnostic());
+	}
+
+	@Test
+	public void aScanCannotRunAfterTheLastAttempt() throws Exception {
+		try {
+			service.startScan(service.config(Workflow.RESIDENT), 3, "10001", "REGISTRATION_ID", screen);
+			org.junit.Assert.fail("no attempt left");
+		} catch (IllegalStateException expected) {
+			// decide() said EXCEPTION
+		}
 	}
 }
