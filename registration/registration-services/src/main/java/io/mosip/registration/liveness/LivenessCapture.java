@@ -107,9 +107,9 @@ public class LivenessCapture implements AutoCloseable {
 				&& !current.finished();
 		if (inProgress) {
 			session.deviceEvent(DeviceEvent.STREAM_INTERRUPTED, LivenessFrameSource.monotonicMillis());
-			// retry() runs on the worker after the event above: it returns once the attempt has failed and its
-			// listeners (screen, audit) have been called. The session is closed right after.
-			session.retry();
+			// A check runs on the worker after the event above: it returns once the attempt has failed and its
+			// listeners (screen, audit) have been called. On a failed attempt it is refused and changes nothing.
+			session.checkCapture((BgrImage) null);
 		}
 		session.close();
 		return inProgress;

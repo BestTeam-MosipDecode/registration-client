@@ -163,7 +163,7 @@ public class LivenessCaptureTest {
 		LivenessCapture capture = capture();
 		session.current = update(SessionState.ACTIVE_CHALLENGE, FeedbackCode.CHALLENGE, null, false, false);
 		assertTrue(capture.abort());
-		assertEquals(java.util.Arrays.asList("STREAM_INTERRUPTED", "retry", "close"), session.calls);
+		assertEquals(java.util.Arrays.asList("STREAM_INTERRUPTED", "check", "close"), session.calls);
 	}
 
 	@Test
