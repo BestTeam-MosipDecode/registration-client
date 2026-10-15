@@ -44,6 +44,11 @@ public class LivenessFrameSourceTest {
 			throw new UnsupportedOperationException();
 		}
 
+		// No @Override: this method comes with face-liveness-pad#70, the test compiles before and after it.
+		public CaptureCheck checkCapture(io.mosip.registration.liveness.image.BgrImage capturedImage) {
+			throw new UnsupportedOperationException();
+		}
+
 		@Override
 		public boolean retry() {
 			return false;
