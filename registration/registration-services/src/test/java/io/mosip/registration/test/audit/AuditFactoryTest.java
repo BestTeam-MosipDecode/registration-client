@@ -1,5 +1,6 @@
 package io.mosip.registration.test.audit;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertSame;
 import static org.mockito.Mockito.when;
@@ -110,6 +111,23 @@ public class AuditFactoryTest {
 		when(auditHandler.addAudit(Mockito.any(AuditRequestDto.class))).thenReturn(true);
 
 		auditFactory.audit(AuditEvent.PACKET_APPROVED, Components.PACKET_CREATOR, "id", "ref");
+	}
+
+	@Test
+	public void auditWithDetailsAddsThemToTheDescription() throws Exception {
+		PowerMockito.doReturn("userId").when(SessionContext.class, "userId");
+		PowerMockito.doReturn("userName").when(SessionContext.class, "userName");
+		when(auditHandler.addAudit(Mockito.any(AuditRequestDto.class))).thenReturn(true);
+
+		auditFactory.audit(AuditEvent.LIVENESS_FAILED, Components.LIVENESS, "id", "ref",
+				"workflow=RESIDENT, attempt=1, durationMs=900, models=1.1.0, reason=CHALLENGE_TIMEOUT");
+
+		org.mockito.ArgumentCaptor<AuditRequestDto> request = org.mockito.ArgumentCaptor.forClass(AuditRequestDto.class);
+		Mockito.verify(auditHandler).addAudit(request.capture());
+		assertEquals(AuditEvent.LIVENESS_FAILED.getDescription()
+				+ " - workflow=RESIDENT, attempt=1, durationMs=900, models=1.1.0, reason=CHALLENGE_TIMEOUT",
+				request.getValue().getDescription());
+		assertEquals(Components.LIVENESS.getId(), request.getValue().getModuleId());
 	}
 
 	//Java11 correction

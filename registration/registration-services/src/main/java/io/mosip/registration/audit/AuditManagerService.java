@@ -38,6 +38,16 @@ public interface AuditManagerService {
 	 */
 	void audit(AuditEvent auditEventEnum, Components appModuleEnum, String refId,
 			String refIdType);
+
+	/**
+	 * Same as {@link #audit(AuditEvent, Components, String, String)}, with details appended to the description of
+	 * the event, for example the workflow, the attempt and the failure reason of a face liveness session.
+	 * 
+	 * @param details
+	 *            details of this occurrence of the event, without any personal or biometric data; may be null
+	 */
+	void audit(AuditEvent auditEventEnum, Components appModuleEnum, String refId, String refIdType,
+			String details);
 	
 	/**
 	 * Delete Audit Logs
