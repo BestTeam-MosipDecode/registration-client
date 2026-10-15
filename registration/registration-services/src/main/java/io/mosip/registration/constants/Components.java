@@ -76,7 +76,9 @@ public enum Components {
 	MDM_NO_DEVICE_AVAILABLE("REG-MOD-150","no device found"),
 	MDM_DEVICE_FOUND("REG-MOD-151","Device found"),
 	
-	CLIENT_UPGRADE("REG-MOD-152", "Client Upgrade");
+	CLIENT_UPGRADE("REG-MOD-152", "Client Upgrade"),
+
+	LIVENESS("REG-MOD-153", "Face liveness");
 
 	/**
 	 * The constructor

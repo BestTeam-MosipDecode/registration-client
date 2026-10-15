@@ -52,6 +52,12 @@ public class AuditManagerSerivceImpl extends BaseService implements AuditManager
 	 */
 	@Override
 	public void audit(AuditEvent auditEventEnum, Components appModuleEnum, String refId, String refIdType) {
+		audit(auditEventEnum, appModuleEnum, refId, refIdType, null);
+	}
+
+	@Override
+	public void audit(AuditEvent auditEventEnum, Components appModuleEnum, String refId, String refIdType,
+			String details) {
 
 		// Getting Host IP Address and Name
 		String hostIP = "localhost";
@@ -72,7 +78,8 @@ public class AuditManagerSerivceImpl extends BaseService implements AuditManager
 		auditRequestBuilder.setActionTimeStamp(DateUtils.getUTCCurrentDateTime())
 				.setApplicationId(String.valueOf(ApplicationContext.map().get(RegistrationConstants.APP_ID)))
 				.setApplicationName(String.valueOf(ApplicationContext.map().get(RegistrationConstants.APP_NAME)))
-				.setCreatedBy(SessionContext.userName()).setDescription(auditEventEnum.getDescription())
+				.setCreatedBy(SessionContext.userName()).setDescription(details == null ? auditEventEnum.getDescription()
+						: auditEventEnum.getDescription() + " - " + details)
 				.setEventId(auditEventEnum.getId()).setEventName(auditEventEnum.getName())
 				.setEventType(auditEventEnum.getType()).setHostIp(hostIP).setHostName(hostName).setId(refId)
 				.setIdType(refIdType).setModuleId(appModuleEnum.getId()).setModuleName(appModuleEnum.getName())
