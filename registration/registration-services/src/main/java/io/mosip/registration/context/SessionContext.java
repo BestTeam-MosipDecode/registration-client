@@ -24,6 +24,8 @@ import io.mosip.registration.constants.LoginMode;
 import io.mosip.registration.constants.ProcessNames;
 import io.mosip.registration.constants.RegistrationConstants;
 import io.mosip.registration.dto.packetmanager.BiometricsDto;
+import io.mosip.registration.liveness.LivenessAuthGate;
+import io.mosip.registration.liveness.api.Workflow;
 import io.mosip.registration.enums.Role;
 import io.mosip.registration.exception.RegBaseCheckedException;
 import io.mosip.registration.mdm.dto.MDMRequestDto;
@@ -427,7 +429,11 @@ public class SessionContext {
 				.getIntValueFromApplicationMap(RegistrationConstants.FACE_AUTHENTICATION_THRESHOLD));
 		
 		List<BiometricsDto> biometrics = bioService.captureModalityForAuth(mdmRequestDto);
-		if(authService.authValidator(authenticationValidatorDTO.getUserId(), BiometricType.FACE.value(), biometrics)) {
+		// Liveness before the comparison: a refused face is never compared (docs/workflows.md, section 2.3).
+		LivenessAuthGate livenessAuthGate = applicationContext.getBean(LivenessAuthGate.class);
+		if (livenessAuthGate.accept(Workflow.OPERATOR, authenticationValidatorDTO.getUserId(), biometrics)
+				&& authService.authValidator(authenticationValidatorDTO.getUserId(), BiometricType.FACE.value(), biometrics)) {
+			livenessAuthGate.authenticated(Workflow.OPERATOR, authenticationValidatorDTO.getUserId());
 			createSessionContext();
 			SessionContext.authTokenDTO().setLoginMode(loginMethod);
 			validAuthModes.add(loginMethod);
