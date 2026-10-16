@@ -1,0 +1,154 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ */
+
+/* Face liveness status pane. Colours and sizes of the screens of docs/ui of face-liveness-pad. */
+
+.liveness-pane {
+	-fx-spacing: 10;
+}
+
+.liveness-challenge-count {
+	-fx-font-size: 14px;
+	-fx-text-fill: #666666;
+}
+
+.liveness-band {
+	-fx-padding: 14 22 14 22;
+	-fx-border-width: 0 0 0 6;
+	-fx-border-style: solid;
+}
+
+.liveness-band-text {
+	-fx-font-size: 28px;
+}
+
+.liveness-resident .liveness-band.liveness-tone-instruction .liveness-band-text {
+	-fx-font-size: 44px;
+}
+
+.liveness-authentication .liveness-band {
+	-fx-padding: 12 16 12 16;
+}
+
+.liveness-authentication .liveness-band-text {
+	-fx-font-size: 22px;
+}
+
+.liveness-authentication .liveness-band.liveness-tone-instruction .liveness-band-text {
+	-fx-font-size: 32px;
+}
+
+.liveness-band.liveness-tone-checking {
+	-fx-background-color: #e8f1fa;
+	-fx-border-color: #005baa;
+}
+
+.liveness-band.liveness-tone-checking .liveness-band-text {
+	-fx-text-fill: #004887;
+}
+
+.liveness-band.liveness-tone-instruction {
+	-fx-background-color: #004887;
+	-fx-border-color: #004887;
+}
+
+.liveness-band.liveness-tone-instruction .liveness-band-text {
+	-fx-text-fill: #ffffff;
+}
+
+.liveness-band.liveness-tone-guidance {
+	-fx-background-color: #fff4e5;
+	-fx-border-color: #e08a00;
+}
+
+.liveness-band.liveness-tone-guidance .liveness-band-text {
+	-fx-text-fill: #8a4500;
+}
+
+.liveness-band.liveness-tone-success {
+	-fx-background-color: #eaf5e3;
+	-fx-border-color: #45a30a;
+}
+
+.liveness-band.liveness-tone-success .liveness-band-text {
+	-fx-text-fill: #2e6b08;
+}
+
+.liveness-band.liveness-tone-failure {
+	-fx-background-color: #fdecec;
+	-fx-border-color: #b71c1c;
+}
+
+.liveness-band.liveness-tone-failure .liveness-band-text {
+	-fx-text-fill: #b71c1c;
+}
+
+.liveness-detail {
+	-fx-font-size: 15px;
+	-fx-text-fill: #666666;
+}
+
+.liveness-progress .bar {
+	-fx-background-color: #005baa;
+}
+
+.liveness-status,
+.liveness-diagnostic {
+	-fx-spacing: 12;
+}
+
+.liveness-status-name {
+	-fx-font-size: 14px;
+	-fx-text-fill: #666666;
+}
+
+.liveness-status-value {
+	-fx-font-size: 14px;
+	-fx-font-weight: bold;
+	-fx-text-fill: #000000;
+}
+
+.liveness-status.liveness-tone-checking .liveness-status-value {
+	-fx-text-fill: #004887;
+}
+
+.liveness-status.liveness-tone-instruction .liveness-status-value,
+.liveness-status.liveness-tone-guidance .liveness-status-value {
+	-fx-text-fill: #8a4500;
+}
+
+.liveness-status.liveness-tone-success .liveness-status-value {
+	-fx-text-fill: #2e6b08;
+}
+
+.liveness-status.liveness-tone-failure .liveness-status-value {
+	-fx-text-fill: #b71c1c;
+}
+
+.liveness-diagnostic-value {
+	-fx-font-size: 13px;
+	-fx-text-fill: #8a4500;
+}
+
+.liveness-buttons {
+	-fx-spacing: 12;
+}
+
+.liveness-button {
+	-fx-background-color: #ffffff;
+	-fx-border-color: #005baa;
+	-fx-text-fill: #005baa;
+	-fx-font-size: 15px;
+	-fx-padding: 8 20 8 20;
+}
+
+.liveness-button-main {
+	-fx-background-color: #004887;
+	-fx-border-color: #004887;
+	-fx-text-fill: #ffffff;
+	-fx-font-size: 15px;
+	-fx-padding: 8 20 8 20;
+}
