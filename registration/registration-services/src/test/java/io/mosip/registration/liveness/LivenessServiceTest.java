@@ -6,22 +6,28 @@
 package io.mosip.registration.liveness;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Matchers.any;
 import static org.mockito.Matchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 import org.junit.Test;
 import org.mockito.ArgumentCaptor;
 
 import io.mosip.registration.audit.AuditManagerService;
+import io.mosip.registration.constants.AuditEvent;
+import io.mosip.registration.constants.Components;
 import io.mosip.registration.constants.RegistrationConstants;
+import io.mosip.registration.dto.RegistrationDTO;
 import io.mosip.registration.liveness.LivenessService.ScanDecision;
 import io.mosip.registration.liveness.api.LivenessEngine;
 import io.mosip.registration.liveness.api.LivenessEventListener;
@@ -35,8 +41,9 @@ public class LivenessServiceTest {
 
 	private final Map<String, String> settings = new HashMap<>();
 	private final LivenessEngine engine = mock(LivenessEngine.class);
+	private final AuditManagerService audit = mock(AuditManagerService.class);
 	private final LivenessService service = new LivenessService(new LivenessConfigProvider(settings::get),
-			new LivenessEngineProvider(() -> engine), mock(AuditManagerService.class));
+			new LivenessEngineProvider(() -> engine), audit);
 	private final LivenessCapture.Callbacks screen = mock(LivenessCapture.Callbacks.class);
 
 	@Test
@@ -100,5 +107,38 @@ public class LivenessServiceTest {
 		} catch (IllegalStateException expected) {
 			// decide() said EXCEPTION
 		}
+	}
+
+	@Test
+	public void aCaptureUnderExceptionMarksTheRegistrationAndIsAudited() {
+		RegistrationDTO registration = new RegistrationDTO();
+		registration.setRegistrationId("10001");
+		assertFalse(LivenessService.requiresSupervisor(registration));
+		service.recordExceptionCapture(registration, "individualBiometrics", 3);
+		assertTrue(LivenessService.requiresSupervisor(registration));
+		assertTrue(registration.getFaceLivenessExceptions().contains("individualBiometrics"));
+		verify(audit).audit(AuditEvent.LIVENESS_EXCEPTION_CAPTURE, Components.LIVENESS, "10001", "REGISTRATION_ID",
+				"workflow=RESIDENT, attempts=3, field=individualBiometrics");
+	}
+
+	@Test
+	public void aFailingAuditStillMarksTheRegistration() {
+		doThrow(new RuntimeException("database")).when(audit).audit(any(AuditEvent.class), any(Components.class),
+				any(String.class), any(String.class), any(String.class));
+		RegistrationDTO registration = new RegistrationDTO();
+		service.recordExceptionCapture(registration, "individualBiometrics", 3);
+		assertTrue(LivenessService.requiresSupervisor(registration));
+	}
+
+	@Test
+	public void thePacketCarriesTheMarkOnlyWhenTheRegistrationIsMarked() {
+		RegistrationDTO registration = new RegistrationDTO();
+		Map<String, String> metaData = new LinkedHashMap<>();
+		LivenessService.addPacketMark(registration, metaData);
+		assertTrue(metaData.isEmpty());
+		registration.getFaceLivenessExceptions().add("individualBiometrics");
+		registration.getFaceLivenessExceptions().add("guardianBiometrics");
+		LivenessService.addPacketMark(registration, metaData);
+		assertEquals("individualBiometrics,guardianBiometrics", metaData.get("faceLivenessException"));
 	}
 }
