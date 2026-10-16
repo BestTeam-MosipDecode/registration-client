@@ -44,8 +44,7 @@ public class ClientIntegrityValidator {
             if (localManifest != null) {
             	Map<String, Attributes> localAttributes = localManifest.getEntries();
                 for (Map.Entry<String, Attributes> entry : localAttributes.entrySet()) {
-                    if(entry.getKey().toLowerCase().startsWith("registration-services") ||
-                            entry.getKey().toLowerCase().startsWith("registration-client") ) {
+                    if(isSignatureVerified(entry.getKey())) {
                         File file = new File(libFolder + File.separator + entry.getKey());
                         if(trustedCertificate != null) {
                             verifyIntegrity(trustedCertificate, new JarFile(file));
@@ -63,6 +62,16 @@ public class ClientIntegrityValidator {
         } catch (Throwable t) {
             throw new SecurityException("Client integrity check failed",t);
         }
+    }
+
+    /**
+     * Jars signed by the release and verified at startup: the client jars and the face liveness engine, which holds
+     * the models the liveness decision depends on. The other libraries are checked by their checksum in the manifest.
+     */
+    public static boolean isSignatureVerified(String jarName) {
+        String name = jarName.toLowerCase();
+        return name.startsWith("registration-services") || name.startsWith("registration-client")
+                || name.startsWith("liveness-engine");
     }
 
     public static void verifyIntegrity(X509Certificate trustedCertificate, JarFile jarFile) throws IOException {
