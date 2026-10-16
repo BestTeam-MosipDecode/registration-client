@@ -36,6 +36,7 @@ import io.mosip.registration.dto.OSIDataDTO;
 import io.mosip.registration.dto.ResponseDTO;
 import io.mosip.registration.dto.UserDTO;
 import io.mosip.registration.exception.RegBaseCheckedException;
+import io.mosip.registration.liveness.LivenessService;
 import io.mosip.registration.service.bio.BioService;
 import io.mosip.registration.service.login.LoginService;
 import io.mosip.registration.service.security.AuthenticationService;
@@ -629,11 +630,13 @@ public class AuthenticationController extends BaseController implements Initiali
 				if (!isReviewer) {
 					/*
 					 * Check whether the biometric exceptions are enabled and supervisor
-					 * authentication is required
+					 * authentication is required. A face captured under the liveness exception
+					 * process always requires it (section 7.1 of docs/decision-flow.md).
 					 */
-					if (!getRegistrationDTOFromSession().getBiometricExceptions().isEmpty()
+					if ((!getRegistrationDTOFromSession().getBiometricExceptions().isEmpty()
 							&& RegistrationConstants.ENABLE.equalsIgnoreCase(
-							getValueFromApplicationContext(RegistrationConstants.REVIEWER_AUTH_CONFIG))) {
+							getValueFromApplicationContext(RegistrationConstants.REVIEWER_AUTH_CONFIG)))
+							|| LivenessService.requiresSupervisor(getRegistrationDTOFromSession())) {
 						authCount = 0;
 						isReviewer = true;
 						getAuthenticationModes(ProcessNames.EXCEPTION.getType());
