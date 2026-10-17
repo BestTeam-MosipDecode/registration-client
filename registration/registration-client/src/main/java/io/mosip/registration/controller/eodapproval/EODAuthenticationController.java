@@ -31,6 +31,10 @@ import io.mosip.registration.dto.ResponseDTO;
 import io.mosip.registration.dto.UserDTO;
 import io.mosip.registration.enums.Role;
 import io.mosip.registration.exception.RegBaseCheckedException;
+import io.mosip.registration.controller.liveness.LivenessAuthScan;
+import io.mosip.registration.liveness.LivenessAuthGate;
+import io.mosip.registration.liveness.LivenessService;
+import io.mosip.registration.liveness.api.Workflow;
 import io.mosip.registration.service.bio.BioService;
 import io.mosip.registration.service.login.LoginService;
 import io.mosip.registration.service.security.AuthenticationService;
@@ -158,6 +162,15 @@ public class EODAuthenticationController extends BaseController implements Initi
 
 	@Autowired
 	private BioService bioService;
+
+	@Autowired
+	private LivenessService livenessService;
+
+	@Autowired
+	private LivenessAuthGate livenessAuthGate;
+
+	// End of day approval: supervisor face authentication gated on liveness (docs/workflows.md, section 2.3).
+	private LivenessAuthScan livenessAuthScan;
 
 	private List<String> userAuthenticationTypeList;
 
@@ -596,6 +609,10 @@ public class EODAuthenticationController extends BaseController implements Initi
 
 	@FXML
 	private void startStream() {
+		if (livenessAuthScan().isEnabled(Workflow.SUPERVISOR)) {
+			validateFace();
+			return;
+		}
 		faceImage.setImage(null);
 		try {
 			streamer.startStream(bioService.getStream(RegistrationConstants.FACE_FULLFACE), faceImage, null);
@@ -612,6 +629,29 @@ public class EODAuthenticationController extends BaseController implements Initi
 	 * @throws RegBaseCheckedException
 	 */
 	public void validateFace() {
+		if (livenessAuthScan().isEnabled(Workflow.SUPERVISOR)) {
+			// The face is captured and compared on its own once liveness is established.
+			if (validateInput(faceUserId, null)) {
+				livenessAuthScan().start(Workflow.SUPERVISOR, faceUserId.getText(), faceImage, this::compareFace);
+			}
+			return;
+		}
+		compareFace();
+	}
+
+	private LivenessAuthScan livenessAuthScan() {
+		if (livenessAuthScan == null) {
+			livenessAuthScan = new LivenessAuthScan(livenessService, livenessAuthGate, bioService, streamer,
+					key -> generateAlert(RegistrationConstants.ERROR, RegistrationUIConstants.getMessageLanguageSpecific(key)),
+					() -> {
+						livenessAuthScan.end();
+						((Stage) faceImage.getScene().getWindow()).close();
+					});
+		}
+		return livenessAuthScan;
+	}
+
+	private void compareFace() {
 		auditFactory.audit(AuditEvent.REG_SUPERVISOR_AUTH_FACE,
 				Components.REG_OS_AUTH,
 				faceUserId.getText().isEmpty() ? RegistrationConstants.AUDIT_DEFAULT_USER : faceUserId.getText(),
@@ -641,7 +681,7 @@ public class EODAuthenticationController extends BaseController implements Initi
 					@Override
 					protected Boolean call() {
 						try {
-							return captureAndValidateFace(userId, false, false);
+							return captureAndValidateFace(userId, false, false, Workflow.SUPERVISOR);
 						} catch (RegBaseCheckedException | IOException exception) {
 							LOGGER.error("AuthenticationController", APPLICATION_NAME, APPLICATION_ID,
 									"Exception while getting the scanned biometrics for user authentication: caused by "
@@ -660,6 +700,10 @@ public class EODAuthenticationController extends BaseController implements Initi
 		taskService.setOnSucceeded(new EventHandler<WorkerStateEvent>() {
 			@Override
 			public void handle(WorkerStateEvent workerStateEvent) {
+				if (livenessAuthScan != null) {
+					// The comparison is done: the liveness scan stops its stream and closes its session.
+					livenessAuthScan.end();
+				}
 				pane.setDisable(false);
 				progressIndicatorPane.setVisible(false);
 				progressIndicator.setVisible(false);
@@ -702,6 +746,9 @@ public class EODAuthenticationController extends BaseController implements Initi
 	 * @param event - the action event
 	 */
 	public void exitWindow(ActionEvent event) {
+		if (livenessAuthScan != null) {
+			livenessAuthScan.end();
+		}
 		Stage primaryStage = (Stage) ((Node) event.getSource()).getParent().getScene().getWindow();
 		primaryStage.close();
 	}

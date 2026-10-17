@@ -45,8 +45,12 @@ import io.mosip.registration.dto.ResponseDTO;
 import io.mosip.registration.dto.UserDTO;
 import io.mosip.registration.dto.mastersync.GenericDto;
 import io.mosip.registration.enums.Role;
+import io.mosip.registration.controller.liveness.LivenessAuthScan;
 import io.mosip.registration.exception.RegBaseCheckedException;
 import io.mosip.registration.exception.RegBaseUncheckedException;
+import io.mosip.registration.liveness.LivenessAuthGate;
+import io.mosip.registration.liveness.LivenessService;
+import io.mosip.registration.liveness.api.Workflow;
 import io.mosip.registration.scheduler.SchedulerUtil;
 import io.mosip.registration.service.bio.BioService;
 import io.mosip.registration.service.login.LoginService;
@@ -201,6 +205,15 @@ public class LoginController extends BaseController implements Initializable {
 
 	@Autowired
 	private BioService bioService;
+
+	@Autowired
+	private LivenessService livenessService;
+
+	@Autowired
+	private LivenessAuthGate livenessAuthGate;
+
+	// Face login gated on liveness (docs/workflows.md, section 2.3).
+	private LivenessAuthScan livenessAuthScan;
 
 	@Autowired
 	private AuthTokenUtilService authTokenUtilService;
@@ -597,6 +610,10 @@ public class LoginController extends BaseController implements Initializable {
 	}
 
 	public void streamFace() {
+		if (livenessAuthScan().isEnabled(Workflow.OPERATOR)) {
+			startFaceLiveness();
+			return;
+		}
 
 		try {
 			streamer.startStream(bioService.getStream(RegistrationConstants.FACE_FULLFACE), faceImage, null);
@@ -658,6 +675,43 @@ public class LoginController extends BaseController implements Initializable {
 	 * @param event event to capture face
 	 */
 	public void captureFace(ActionEvent event) {
+		if (livenessAuthScan().isEnabled(Workflow.OPERATOR)) {
+			// The face is captured and compared on its own once liveness is established.
+			startFaceLiveness();
+			return;
+		}
+		validateFaceLogin();
+	}
+
+	private LivenessAuthScan livenessAuthScan() {
+		if (livenessAuthScan == null) {
+			livenessAuthScan = new LivenessAuthScan(livenessService, livenessAuthGate, bioService, streamer,
+					key -> generateAlert(RegistrationConstants.ERROR,
+							RegistrationUIConstants.getMessageLanguageSpecific(key)),
+					() -> back(null));
+			// Stored in the database and locking the account, unlike the attempts of the liveness gate.
+			livenessAuthScan.setOnFailedAttempt((workflow, user) -> countFailedFaceLiveness(user));
+		}
+		return livenessAuthScan;
+	}
+
+	private void startFaceLiveness() {
+		livenessAuthScan().start(Workflow.OPERATOR, userId.getText(), faceImage, this::validateFaceLogin);
+	}
+
+	/**
+	 * A failed liveness attempt at login counts in the failed-login counter of the user, so that restarting the client
+	 * gives no new attempts. The pane already shows the failure: only the lock of the account is alerted.
+	 */
+	private void countFailedFaceLiveness(String user) {
+		UserDTO userDTO = loginService.getUserDetail(user);
+		if (userDTO != null) {
+			validateInvalidLogin(userDTO,
+					RegistrationUIConstants.getMessageLanguageSpecific("LIVENESS_FAILED"), false);
+		}
+	}
+
+	private void validateFaceLogin() {
 
 		auditFactory.audit(AuditEvent.LOGIN_WITH_FACE, Components.LOGIN, userId.getText(),
 				AuditReferenceIdTypes.USER_ID.getReferenceTypeId());
@@ -711,6 +765,10 @@ public class LoginController extends BaseController implements Initializable {
 		taskService.setOnSucceeded(new EventHandler<WorkerStateEvent>() {
 			@Override
 			public void handle(WorkerStateEvent workerStateEvent) {
+				if (RegistrationConstants.FACE.equals(loginMode) && livenessAuthScan != null) {
+					// The comparison is done: the liveness scan stops its stream and closes its session.
+					livenessAuthScan.end();
+				}
 				boolean bioLoginStatus = false;
 				if (taskService.getValue()) {
 					bioLoginStatus = validateInvalidLogin(userDTO, "");
@@ -966,6 +1024,10 @@ public class LoginController extends BaseController implements Initializable {
 	 * @return boolean
 	 */
 	private boolean validateInvalidLogin(UserDTO userDTO, String errorMessage) {
+		return validateInvalidLogin(userDTO, errorMessage, true);
+	}
+
+	private boolean validateInvalidLogin(UserDTO userDTO, String errorMessage, boolean alertFailure) {
 		LOGGER.info(LoggerConstants.LOG_REG_LOGIN, APPLICATION_NAME, APPLICATION_ID, "Fetching invalid login params");
 
 		int invalidLoginCount = Integer
@@ -990,7 +1052,9 @@ public class LoginController extends BaseController implements Initializable {
 			case "true":
 				return true;
 			default:
-				generateAlert(RegistrationConstants.ERROR, errorMessage);
+				if (alertFailure) {
+					generateAlert(RegistrationConstants.ERROR, errorMessage);
+				}
 		}
 
 		LOGGER.info("Validated number of login attempts, failed!");
@@ -1003,6 +1067,9 @@ public class LoginController extends BaseController implements Initializable {
 	 * @param event event for go back to username page
 	 */
 	public void back(ActionEvent event) {
+		if (livenessAuthScan != null) {
+			livenessAuthScan.end();
+		}
 
 		LOGGER.info(LoggerConstants.LOG_REG_LOGIN, APPLICATION_NAME, APPLICATION_ID,
 				"Started navigating back to user name page");
