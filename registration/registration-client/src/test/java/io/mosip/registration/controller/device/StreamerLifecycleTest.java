@@ -193,6 +193,37 @@ public class StreamerLifecycleTest {
 	}
 
 	@Test(timeout = 10000)
+	public void aStreamStoppedBeforeItsThreadStartsIsNeverRead() throws Exception {
+		SocketLikeStream other = new SocketLikeStream();
+		streamer.startStream(other, null, null);
+		awaitReading(other);
+		TrackedStream mine = new TrackedStream(part(JPEG));
+		streamer.setFrameListener(recorder);
+		// The scan ends between startStream and the first instruction of its thread.
+		streamer.stopStream(mine);
+		streamer.startStream(mine, null, null);
+		Thread.sleep(300);
+		assertTrue(mine.closed);
+		assertTrue("the stream of the other screen goes on", streamer.getUrlStream() == other);
+		assertTrue(recorder.frames.isEmpty());
+		assertTrue(recorder.interruptions.isEmpty());
+		streamer.setUrlStream(null);
+	}
+
+	@Test(timeout = 10000)
+	public void stoppingTheStreamInProgressRemovesTheListener() throws Exception {
+		SocketLikeStream stream = new SocketLikeStream();
+		streamer.setFrameListener(recorder);
+		streamer.startStream(stream, null, null);
+		awaitReading(stream);
+		streamer.stopStream(stream);
+		assertTrue(streamer.getUrlStream() == null);
+		streamer.notifyFrame(JPEG);
+		assertTrue(recorder.frames.isEmpty());
+		assertTrue("no interruption expected", !recorder.interrupted.await(1, TimeUnit.SECONDS));
+	}
+
+	@Test(timeout = 10000)
 	public void severalFramesReachTheListenerAndThePreview() throws Exception {
 		byte[] jpeg = tinyJpeg();
 		byte[] one = part(jpeg);

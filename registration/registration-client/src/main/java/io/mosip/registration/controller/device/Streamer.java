@@ -102,6 +102,22 @@ public class Streamer {
 
 	}
 
+	/**
+	 * Stops one stream of the client, whether or not its thread has started reading it: a stream stopped before is
+	 * never read. The stream of another screen goes on.
+	 */
+	public synchronized void stopStream(InputStream stream) {
+		if (stream == null) {
+			return;
+		}
+		if (urlStream == stream) {
+			setUrlStream(null);
+			return;
+		}
+		markClosedByClient(stream);
+		closeQuietly(stream);
+	}
+
 	public InputStream getUrlStream() {
 		return urlStream;
 	}
@@ -152,7 +168,13 @@ public class Streamer {
 
 			public void run() {
 
-				setUrlStream(inputStream);
+				synchronized (Streamer.this) {
+					if (inputStream != null && isClosedByClient(inputStream)) {
+						// Stopped before this thread started: the stream in progress, if any, is left alone.
+						return;
+					}
+					setUrlStream(inputStream);
+				}
 
 				// Each thread reads its own stream and stops when the client closes or replaces it.
 				while (urlStream == inputStream && null != inputStream) {
