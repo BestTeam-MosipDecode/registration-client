@@ -222,7 +222,6 @@ public class GenericBiometricsController extends BaseController {
 	private Object livenessPaneRegistration;
 	private String livenessPaneField;
 	// Set when a scan starts: true for a face capture under the liveness exception process, without a liveness decision.
-	private boolean livenessExceptionScan;
 	// Opening and ending liveness sessions, in order: an ended attempt is counted before the next session opens, and
 	// the engine runs one session at a time.
 	private final ExecutorService livenessExecutor = Executors.newSingleThreadExecutor(task -> {
@@ -492,6 +491,8 @@ public class GenericBiometricsController extends BaseController {
 				attempts.get()) != LivenessService.ScanDecision.EXCEPTION) {
 			return;
 		}
+		// Marked at once: every later capture of this field goes through the exception, whatever happens to this one.
+		LivenessService.markException(getRegistrationDTOFromSession(), fxControl.getUiSchemaDTO().getId());
 		startScan(true);
 	}
 
@@ -504,8 +505,10 @@ public class GenericBiometricsController extends BaseController {
 
 		// A new scan, of this field or another one, ends the liveness scan in progress.
 		endLivenessScan(livenessScan, null);
-		livenessExceptionScan = underException && isFace(currentModality);
-		if (isFace(currentModality) && !livenessExceptionScan && !prepareLivenessScan()) {
+		// Kept by this search only: another scan started during the device search cannot change it.
+		final boolean exceptionScan = underException && isFace(currentModality);
+		final FxControl controlOfSearch = fxControl;
+		if (isFace(currentModality) && !exceptionScan && !prepareLivenessScan()) {
 			disableEnableBiometricPane(false);
 			return;
 		}
@@ -551,10 +554,21 @@ public class GenericBiometricsController extends BaseController {
 					// Ended meanwhile, by a newer scan: nothing to do, the newer scan owns the pane.
 					return;
 				}
+				if (exceptionScan && (fxControl != controlOfSearch || !isFace(currentModality))) {
+					// Another field or modality was opened during the search: its capture would land there.
+					disableEnableBiometricPane(false);
+					return;
+				}
 				if (scanOfSearch != null && scanOfSearch.capture == null) {
-					// The liveness engine could not start, or no attempt is left: the capture is refused.
-					endLivenessScan(scanOfSearch, scanOfSearch.refusal != null ? scanOfSearch.refusal
-							: RegistrationUIConstants.getMessageLanguageSpecific("LIVENESS_GENERIC_FAILURE"));
+					if (scanOfSearch.refusal != null) {
+						// The interrupted attempt of the previous scan was the last one: the pane offers what follows.
+						endLivenessScan(scanOfSearch, null);
+						showLivenessMaxAttempts(scanOfSearch.refusal == LivenessService.ScanDecision.EXCEPTION);
+					} else {
+						// The liveness engine could not start: the capture is refused.
+						endLivenessScan(scanOfSearch,
+								RegistrationUIConstants.getMessageLanguageSpecific("LIVENESS_GENERIC_FAILURE"));
+					}
 					return;
 				}
 				try {
@@ -589,7 +603,7 @@ public class GenericBiometricsController extends BaseController {
 						scanOfSearch.startWatchdog();
 					} else {
 						streamer.setFrameListener(null);
-						rCaptureTaskService();
+						rCaptureTaskService(exceptionScan);
 					}
 					streamer.startStream(urlStream, biometricImage, biometricImage);
 
@@ -730,9 +744,7 @@ public class GenericBiometricsController extends BaseController {
 				}
 				LivenessService.ScanDecision decision = LivenessService.decide(scan.config, scan.attempts.get());
 				if (decision != LivenessService.ScanDecision.LIVENESS) {
-					scan.refusal = RegistrationUIConstants.getMessageLanguageSpecific(
-							decision == LivenessService.ScanDecision.EXCEPTION ? "LIVENESS_MAX_ATTEMPTS"
-									: "LIVENESS_MAX_ATTEMPTS_BLOCKED");
+					scan.refusal = decision;
 					return;
 				}
 				try {
@@ -810,7 +822,7 @@ public class GenericBiometricsController extends BaseController {
 		private volatile LivenessCapture capture;
 		private volatile CaptureCheck check;
 		private volatile LivenessUpdate lastUpdate;
-		private volatile String refusal;
+		private volatile LivenessService.ScanDecision refusal;
 		private volatile InputStream stream;
 		private PauseTransition watchdog;
 		private volatile boolean ended;
@@ -856,7 +868,7 @@ public class GenericBiometricsController extends BaseController {
 				}
 				stopWatchdog();
 				capture.captureRequested();
-				rCaptureTaskService();
+				rCaptureTaskService(false);
 			});
 		}
 
@@ -869,8 +881,12 @@ public class GenericBiometricsController extends BaseController {
 					+ config.getPolicy().minChallenges() * config.getPolicy().challengeTimeoutMs() + 15000;
 			watchdog = new PauseTransition(javafx.util.Duration.millis(limitMs));
 			// No message once the screen has been left, for example after a logout that stopped the stream.
-			watchdog.setOnFinished(event -> endLivenessScan(this, control.getNode().getScene() == null ? null
-					: unlessShownInPane(this, RegistrationUIConstants.getMessageLanguageSpecific("LIVENESS_DEVICE_UNAVAILABLE"))));
+			// Before any analysed frame, the end of the session sends no update to the pane: the alert says it.
+			watchdog.setOnFinished(event -> {
+				String message = RegistrationUIConstants.getMessageLanguageSpecific("LIVENESS_DEVICE_UNAVAILABLE");
+				endLivenessScan(this, control.getNode().getScene() == null ? null
+						: lastUpdate == null ? message : unlessShownInPane(this, message));
+			});
 			watchdog.play();
 		}
 
@@ -912,10 +928,10 @@ public class GenericBiometricsController extends BaseController {
 	}
 
 
-	public void rCaptureTaskService() {
+	/** @param underLivenessException the face is captured without a liveness decision, under the exception process */
+	public void rCaptureTaskService(boolean underLivenessException) {
 		LOGGER.debug("Capture request called at : {}", System.currentTimeMillis());
 		final LivenessScan scanOfCapture = livenessScan;
-		final boolean underLivenessException = livenessExceptionScan;
 
 		rCaptureTaskService = new Service<List<BiometricsDto>>() {
 			@Override

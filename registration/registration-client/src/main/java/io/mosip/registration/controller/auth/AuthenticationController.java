@@ -34,7 +34,6 @@ import io.mosip.registration.controller.reg.RegistrationController;
 import io.mosip.registration.controller.reg.Validations;
 import io.mosip.registration.dto.OSIDataDTO;
 import io.mosip.registration.dto.ResponseDTO;
-import io.mosip.registration.dto.UserDTO;
 import io.mosip.registration.exception.RegBaseCheckedException;
 import io.mosip.registration.controller.liveness.LivenessAuthScan;
 import io.mosip.registration.liveness.LivenessAuthGate;
@@ -621,6 +620,11 @@ public class AuthenticationController extends BaseController implements Initiali
 		Set<String> roleSet = new HashSet<>(SessionContext.userContext().getRoles());
 		
 		userAuthenticationTypeList = loginService.getModesOfLogin(authType, roleSet);
+		if (isReviewer && getRegistrationDTOFromSession() != null) {
+			// Without liveness on the supervisor's face, a photo would approve a registration marked under exception.
+			userAuthenticationTypeList = LivenessService.supervisorModes(userAuthenticationTypeList,
+					getRegistrationDTOFromSession(), false);
+		}
 
 		if (userAuthenticationTypeList.isEmpty()) {
 			isReviewer = false;
@@ -987,11 +991,9 @@ public class AuthenticationController extends BaseController implements Initiali
 	private boolean isValidReviewer(String userId) {
 		LOGGER.info("Validating the user role in case of Reviewer Authentication");
 
-		UserDTO userDTO = loginService.getUserDetail(userId);
-		if (userDTO != null && !SessionContext.userId().equals(userId)) {
-			return true;
-		}
-		return false;
+		// The id of the user found, whatever the case typed; the supervisor role for a registration under exception.
+		return LivenessService.isValidReviewer(loginService.getUserDetail(userId), SessionContext.userId(),
+				getRegistrationDTOFromSession());
 	}
 	
 	private boolean validateInput(TextField userId, TextField pword) {
