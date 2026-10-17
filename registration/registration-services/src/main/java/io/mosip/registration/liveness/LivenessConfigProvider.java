@@ -202,7 +202,8 @@ public class LivenessConfigProvider {
 			try {
 				return OnMaxAttempts.valueOf(found[1].toUpperCase(Locale.ROOT));
 			} catch (IllegalArgumentException exception) {
-				return invalid(found, defaultValue);
+				// Not the default: a wrong value must never open the exception process.
+				return invalid(found, OnMaxAttempts.BLOCK);
 			}
 		}
 

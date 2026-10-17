@@ -13,6 +13,7 @@ import java.util.List;
 
 import org.junit.Test;
 
+import io.mosip.registration.liveness.active.ChallengeType;
 import io.mosip.registration.liveness.api.FailureReason;
 import io.mosip.registration.liveness.api.FeedbackCode;
 import io.mosip.registration.liveness.api.LivenessEvent;
@@ -55,6 +56,14 @@ public class AttemptOffsetListenerTest {
 		assertEquals(3, events.get(0).attempt());
 		assertEquals(800, events.get(0).durationMs());
 		assertEquals(FailureReason.CHALLENGE_TIMEOUT, events.get(0).failureReason().get());
+	}
+
+	@Test
+	public void keepsThePositionOfTheChallenge() {
+		listener.onUpdate(new LivenessUpdate(SessionState.ACTIVE_CHALLENGE, FeedbackCode.CHALLENGE, null,
+				ChallengeType.BLINK, 0.5, 1, 1, null, false, false, null, 2, 3));
+		assertEquals(2, updates.get(0).challengeIndex());
+		assertEquals(3, updates.get(0).challengeCount());
 	}
 
 	@Test

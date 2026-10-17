@@ -64,6 +64,8 @@ public class RegistrationDTO {
 	private Map<String, DocumentDto> documents = new HashMap<>();
 	private Map<String, BiometricsDto> biometrics = new HashMap<>();
 	private Map<String, BiometricsException> biometricExceptions = new HashMap<>();
+	// Face fields captured under the liveness exception process: a supervisor authenticates at submission.
+	private Set<String> faceLivenessExceptions = new LinkedHashSet<>();
 
 	private List<BiometricsDto> supervisorBiometrics = new ArrayList<>();
 	private List<BiometricsDto> officerBiometrics = new ArrayList<>();

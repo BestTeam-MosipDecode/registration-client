@@ -329,6 +329,8 @@ public enum AuditEvent {
 			"Face liveness: attempts exhausted"),
 	LIVENESS_DEVICE_ERROR("REG-EVT-111", SYSTEM_EVENT.getCode(), "LIVENESS_DEVICE_ERROR",
 			"Face liveness: device error"),
+	LIVENESS_EXCEPTION_CAPTURE("REG-EVT-112", USER_EVENT.getCode(), "LIVENESS_EXCEPTION_CAPTURE",
+			"Face liveness: face captured under the exception process"),
 	
 	CLIENT_UPGRADE_JARS_DOWNLOADED("REG-UPG-001", USER_EVENT.getCode(), "CLIENT_UPGRADE_JARS_DOWNLOADED",
 			"Client Upgrade: Successfully downloaded all the upgrade jars"),

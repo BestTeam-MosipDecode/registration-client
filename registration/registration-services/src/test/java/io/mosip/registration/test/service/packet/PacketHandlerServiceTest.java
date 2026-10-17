@@ -261,6 +261,29 @@ public class PacketHandlerServiceTest {
 	@Test
 	public void testPacketHandle() throws RegBaseCheckedException, JsonProcessingException {
 		registrationDTO = DataProvider.getFilledPacketDTO(Arrays.asList("eng", "fra"));
+		ResponseDTO response = handleFilledPacket();
+		Assert.assertNotNull(response.getSuccessResponseDTO());
+		Assert.assertFalse(packetMetaInfoHasLabel("faceLivenessException"));
+	}
+
+	@Test
+	public void aFaceCapturedUnderTheLivenessExceptionIsMarkedInThePacket()
+			throws RegBaseCheckedException, JsonProcessingException {
+		registrationDTO = DataProvider.getFilledPacketDTO(Arrays.asList("eng", "fra"));
+		registrationDTO.getFaceLivenessExceptions().add("individualBiometrics");
+		Assert.assertNotNull(handleFilledPacket().getSuccessResponseDTO());
+		Assert.assertTrue(packetMetaInfoHasLabel("faceLivenessException"));
+	}
+
+	/** Whether a label and value list of the packet meta info holds the label. */
+	private boolean packetMetaInfoHasLabel(String label) throws JsonProcessingException {
+		org.mockito.ArgumentCaptor<Object> written = org.mockito.ArgumentCaptor.forClass(Object.class);
+		Mockito.verify(objectMapper, Mockito.atLeastOnce()).writeValueAsString(written.capture());
+		return written.getAllValues().stream().anyMatch(value -> value instanceof List && ((List<?>) value).stream()
+				.anyMatch(entry -> entry instanceof Map && label.equals(((Map<?, ?>) entry).get("label"))));
+	}
+
+	private ResponseDTO handleFilledPacket() throws RegBaseCheckedException, JsonProcessingException {
 		
 		List<PacketInfo> packetInfo = new ArrayList<>();
 		PacketInfo pInfo = new PacketInfo();
@@ -311,8 +334,7 @@ public class PacketHandlerServiceTest {
 		device.setDeviceMake("test_make");
 		deviceMap.put("FINGERPRINT_DEVICE", device);
 		Mockito.when(MosipDeviceSpecificationFactory.getDeviceRegistryInfo()).thenReturn(deviceMap);
-		ResponseDTO response = packetHandlerServiceImpl.handle(registrationDTO);
-		Assert.assertNotNull(response.getSuccessResponseDTO());
+		return packetHandlerServiceImpl.handle(registrationDTO);
 	}
 	
 	@Test

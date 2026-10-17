@@ -5,10 +5,25 @@
  */
 package io.mosip.registration.liveness;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import io.mosip.kernel.core.logger.spi.Logger;
 import io.mosip.registration.audit.AuditManagerService;
+import io.mosip.registration.config.AppConfig;
+import io.mosip.registration.constants.AuditEvent;
+import io.mosip.registration.constants.AuditReferenceIdTypes;
+import io.mosip.registration.constants.Components;
+import io.mosip.registration.constants.RegistrationConstants;
+import io.mosip.registration.dto.RegistrationDTO;
+import io.mosip.registration.dto.UserDTO;
+import io.mosip.registration.dto.UserRoleDTO;
+import io.mosip.registration.enums.Role;
 import io.mosip.registration.liveness.api.LivenessPolicy;
 import io.mosip.registration.liveness.api.LivenessSession;
 import io.mosip.registration.liveness.api.ModelIntegrityException;
@@ -21,6 +36,14 @@ import io.mosip.registration.liveness.api.Workflow;
  */
 @Component
 public class LivenessService {
+
+	private static final Logger LOGGER = AppConfig.getLogger(LivenessService.class);
+
+	/**
+	 * Entry of the packet meta data that lists the face fields captured under the liveness exception process.
+	 * Provisional: how the mark travels in the packet is to be confirmed with the mentors (Q15).
+	 */
+	static final String PACKET_MARK = "faceLivenessException";
 
 	/** What the next scan of a capture does. */
 	public enum ScanDecision {
@@ -83,6 +106,78 @@ public class LivenessService {
 						new LivenessAuditListener(auditManagerService, capture.listener(), refId, refIdType)));
 		capture.attach(session);
 		return capture;
+	}
+
+	/**
+	 * The face of the field was captured without a liveness decision, after the last attempt, under the exception
+	 * process (section 7.1 of docs/decision-flow.md): the registration is marked and the capture audited. A failing
+	 * audit write does not undo the mark.
+	 */
+	public void recordExceptionCapture(RegistrationDTO registration, String fieldId, int attemptsUsed) {
+		markException(registration, fieldId);
+		try {
+			auditManagerService.audit(AuditEvent.LIVENESS_EXCEPTION_CAPTURE, Components.LIVENESS,
+					registration.getRegistrationId(), AuditReferenceIdTypes.REGISTRATION_ID.getReferenceTypeId(),
+					String.format(Locale.ROOT, "workflow=%s, attempts=%d, field=%s", Workflow.RESIDENT, attemptsUsed,
+							fieldId));
+		} catch (RuntimeException exception) {
+			LOGGER.error("Face liveness exception audit failed", exception);
+		}
+	}
+
+	/**
+	 * The operator chose the exception process for the face of the field: the registration is marked at once, since
+	 * every later capture of that field goes through the exception. The capture itself is audited by
+	 * {@link #recordExceptionCapture}.
+	 */
+	public static void markException(RegistrationDTO registration, String fieldId) {
+		registration.getFaceLivenessExceptions().add(fieldId);
+	}
+
+	/** A face of the registration was captured under the exception process: a supervisor must authenticate. */
+	public static boolean requiresSupervisor(RegistrationDTO registration) {
+		return !registration.getFaceLivenessExceptions().isEmpty();
+	}
+
+	/**
+	 * The reviewer found for the user id typed at the supervisor step: another user than the operator, whatever the
+	 * case of the id, and, for a marked registration, a user with a supervisor role (section 7.1 of
+	 * docs/decision-flow.md).
+	 */
+	public static boolean isValidReviewer(UserDTO reviewer, String operatorId, RegistrationDTO registration) {
+		if (reviewer == null || reviewer.getId() == null || reviewer.getId().equalsIgnoreCase(operatorId)) {
+			return false;
+		}
+		if (registration != null && !requiresSupervisor(registration)) {
+			return true;
+		}
+		List<String> roles = new ArrayList<>();
+		if (reviewer.getUserRole() != null) {
+			for (UserRoleDTO userRole : reviewer.getUserRole()) {
+				roles.add(userRole.getRoleCode());
+			}
+		}
+		return Role.hasSupervisorRole(roles);
+	}
+
+	/**
+	 * The authentication modes of the supervisor: for a marked registration, the face only when liveness checks it,
+	 * since a photo of the supervisor would otherwise approve the exception.
+	 */
+	public static List<String> supervisorModes(List<String> modes, RegistrationDTO registration,
+			boolean faceLivenessChecked) {
+		List<String> allowed = new ArrayList<>(modes);
+		if (requiresSupervisor(registration) && !faceLivenessChecked) {
+			allowed.removeIf(RegistrationConstants.FACE::equalsIgnoreCase);
+		}
+		return allowed;
+	}
+
+	/** Adds the exception mark to the meta data of the packet, only for a marked registration. */
+	public static void addPacketMark(RegistrationDTO registration, Map<String, String> metaData) {
+		if (requiresSupervisor(registration)) {
+			metaData.put(PACKET_MARK, String.join(",", registration.getFaceLivenessExceptions()));
+		}
 	}
 
 	static LivenessPolicy withMaxAttempts(LivenessPolicy policy, int maxAttempts) {

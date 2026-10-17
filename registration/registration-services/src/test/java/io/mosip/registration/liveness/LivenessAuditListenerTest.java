@@ -138,7 +138,7 @@ public class LivenessAuditListenerTest {
 				assertTrue("duplicate id " + auditEvent.getId(), ids.add(auditEvent.getId()));
 			}
 		}
-		assertEquals(8, ids.size());
+		assertEquals(9, ids.size());
 		for (AuditEvent auditEvent : EnumSet.allOf(AuditEvent.class)) {
 			if (!auditEvent.name().startsWith("LIVENESS_")) {
 				assertFalse("id reused by " + auditEvent, ids.contains(auditEvent.getId()));
