@@ -188,6 +188,17 @@ public class LivenessStatusModelTest {
 	}
 
 	@Test
+	public void aCaptureUnderExceptionSaysThatASupervisorMustAuthenticate() {
+		LivenessStatusModel model = LivenessStatusModel.exceptionCaptured();
+		assertEquals(Tone.GUIDANCE, model.tone());
+		assertEquals("LIVENESS_EXCEPTION_CAPTURED", model.band().key());
+		assertEquals(List.of("LIVENESS_EXCEPTION_SUPERVISOR"), keys(model.details()));
+		assertEquals("livenessNotVerified", model.statusLabel());
+		assertFalse(model.retry() || model.continueUnderException() || model.otherSignIn());
+		assertTrue(model.progress() < 0);
+	}
+
+	@Test
 	public void withoutTheExceptionProcessTheResidentIsSentToTheSupervisor() {
 		LivenessStatusModel model = LivenessStatusModel.maxAttempts(Workflow.RESIDENT, false);
 		assertEquals("LIVENESS_MAX_ATTEMPTS_BLOCKED", model.band().key());
