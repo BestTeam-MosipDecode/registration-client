@@ -134,6 +134,16 @@ public class LivenessService {
 		registration.getFaceLivenessExceptions().add(fieldId);
 	}
 
+	/**
+	 * A new scan of a field already marked, after its last attempt: it goes through the exception again, without a
+	 * liveness decision, since the operator chose the exception process for that field.
+	 */
+	public static boolean capturesUnderException(RegistrationDTO registration, String fieldId, LivenessConfig config,
+			int attemptsUsed) {
+		return registration.getFaceLivenessExceptions().contains(fieldId)
+				&& decide(config, attemptsUsed) == ScanDecision.EXCEPTION;
+	}
+
 	/** A face of the registration was captured under the exception process: a supervisor must authenticate. */
 	public static boolean requiresSupervisor(RegistrationDTO registration) {
 		return !registration.getFaceLivenessExceptions().isEmpty();

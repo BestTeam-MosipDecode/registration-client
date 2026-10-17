@@ -96,6 +96,15 @@ public final class LivenessStatusModel {
 		return b.build();
 	}
 
+	/**
+	 * The face of a resident was captured under the exception process, without a liveness decision: a supervisor
+	 * authenticates at submission (section 7.1 of docs/decision-flow.md).
+	 */
+	public static LivenessStatusModel exceptionCaptured() {
+		return new Builder().tone(Tone.GUIDANCE).band("LIVENESS_EXCEPTION_CAPTURED")
+				.detail("LIVENESS_EXCEPTION_SUPERVISOR").status("livenessNotVerified").build();
+	}
+
 	/** The model of an update of the engine. */
 	public static LivenessStatusModel of(LivenessUpdate update, Workflow workflow, boolean exceptionAllowed) {
 		if (update.feedback() == FeedbackCode.MAX_ATTEMPTS_EXCEEDED) {

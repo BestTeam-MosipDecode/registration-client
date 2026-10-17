@@ -126,6 +126,11 @@ public final class LivenessStatusPane extends VBox {
 		render(LivenessStatusModel.maxAttempts(workflow, exceptionAllowed));
 	}
 
+	/** The face of the resident was captured under the exception process: a supervisor authenticates at submission. */
+	public void showExceptionCaptured() {
+		render(LivenessStatusModel.exceptionCaptured());
+	}
+
 	/**
 	 * Whether the exception process follows the last attempt of a resident, from {@code on_max_attempts}. True by
 	 * default for the resident, as in the default configuration.
