@@ -107,7 +107,7 @@ public final class LivenessStatusPane extends VBox {
 		buttons.getStyleClass().add("liveness-buttons");
 		setUpButton(retry, "livenessTryAgain", false);
 		setUpButton(continueUnderException, "livenessContinueException", true);
-		setUpButton(otherSignIn, "livenessSignInPassword", true);
+		setUpButton(otherSignIn, "livenessOtherSignIn", true);
 		retry.setOnAction(event -> onRetry.run());
 		continueUnderException.setOnAction(event -> onContinueUnderException.run());
 		otherSignIn.setOnAction(event -> onOtherSignIn.run());
