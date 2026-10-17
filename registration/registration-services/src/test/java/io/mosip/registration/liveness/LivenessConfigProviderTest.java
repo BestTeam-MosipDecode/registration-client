@@ -128,7 +128,8 @@ public class LivenessConfigProviderTest {
 		values.put(P + "on_max_attempts", "LATER");
 		LivenessConfig config = provider.forWorkflow(Workflow.RESIDENT);
 		assertTrue(config.isEnabled());
-		assertEquals(OnMaxAttempts.EXCEPTION, config.getOnMaxAttempts());
+		// An unreadable on_max_attempts never opens the exception process: BLOCK, not the default EXCEPTION.
+		assertEquals(OnMaxAttempts.BLOCK, config.getOnMaxAttempts());
 		LivenessPolicy p = config.getPolicy();
 		assertEquals(defaults.maxAttempts(), p.maxAttempts());
 		assertEquals(defaults.minFrames(), p.minFrames());
