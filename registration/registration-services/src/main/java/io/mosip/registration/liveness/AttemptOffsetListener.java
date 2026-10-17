@@ -34,7 +34,8 @@ class AttemptOffsetListener implements LivenessEventListener {
 		next.onUpdate(new LivenessUpdate(update.state(), update.feedback(), update.tip().orElse(null),
 				update.challenge().orElse(null), update.progress(), attempt(update.attempt()), maxAttempts,
 				update.failureReason().orElse(null), update.retryAvailable(), update.finished(),
-				update.diagnosticScore().isPresent() ? update.diagnosticScore().getAsDouble() : null));
+				update.diagnosticScore().isPresent() ? update.diagnosticScore().getAsDouble() : null,
+				update.challengeIndex(), update.challengeCount()));
 	}
 
 	@Override

@@ -72,6 +72,7 @@ import io.mosip.registration.dto.packetmanager.BiometricsDto;
 import io.mosip.registration.dto.packetmanager.DocumentDto;
 import io.mosip.registration.dto.packetmanager.metadata.BiometricsMetaInfoDto;
 import io.mosip.registration.dto.packetmanager.metadata.DocumentMetaInfoDTO;
+import io.mosip.registration.liveness.LivenessService;
 import io.mosip.registration.dto.schema.SchemaDto;
 import io.mosip.registration.entity.Registration;
 import io.mosip.registration.exception.RegBaseCheckedException;
@@ -321,6 +322,7 @@ public class PacketHandlerServiceImpl extends BaseService implements PacketHandl
 		metaData.put("langCodes", String.join(RegistrationConstants.COMMA, registrationDTO.getSelectedLanguagesByApplicant()));
 		metaData.put(PacketManagerConstants.META_APPLICANT_CONSENT,
 				registrationDTO.getRegistrationMetaDataDTO().getConsentOfApplicant());
+		LivenessService.addPacketMark(registrationDTO, metaData);
 
 		metaInfoMap.put("metaData", getJsonString(getLabelValueDTOListString(metaData)));
 		metaInfoMap.put("blockListedWords", getJsonString(registrationDTO.BLOCKLISTED_CHECK));
