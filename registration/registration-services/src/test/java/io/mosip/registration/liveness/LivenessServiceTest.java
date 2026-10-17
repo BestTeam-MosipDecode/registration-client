@@ -189,6 +189,19 @@ public class LivenessServiceTest {
 				LivenessService.supervisorModes(Collections.singletonList("FACE"), registration, false));
 	}
 
+	@Test
+	public void theMarkGoesWithTheFaceOfItsField() {
+		RegistrationDTO registration = new RegistrationDTO();
+		LivenessService.markException(registration, "individualBiometrics");
+		LivenessService.markException(registration, "guardianBiometrics");
+		registration.clearBIOCache("individualBiometrics", "leftEye");
+		assertTrue(registration.getFaceLivenessExceptions().contains("individualBiometrics"));
+		registration.clearBIOCache("individualBiometrics", "face");
+		assertEquals(Collections.singleton("guardianBiometrics"), registration.getFaceLivenessExceptions());
+		registration.clearRegistrationDto();
+		assertFalse(LivenessService.requiresSupervisor(registration));
+	}
+
 	private static UserDTO user(String id, String... roles) {
 		UserDTO user = new UserDTO();
 		user.setId(id);
