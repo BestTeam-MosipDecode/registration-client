@@ -689,12 +689,26 @@ public class LoginController extends BaseController implements Initializable {
 					key -> generateAlert(RegistrationConstants.ERROR,
 							RegistrationUIConstants.getMessageLanguageSpecific(key)),
 					() -> back(null));
+			// Stored in the database and locking the account, unlike the attempts of the liveness gate.
+			livenessAuthScan.setOnFailedAttempt((workflow, user) -> countFailedFaceLiveness(user));
 		}
 		return livenessAuthScan;
 	}
 
 	private void startFaceLiveness() {
 		livenessAuthScan().start(Workflow.OPERATOR, userId.getText(), faceImage, this::validateFaceLogin);
+	}
+
+	/**
+	 * A failed liveness attempt at login counts in the failed-login counter of the user, so that restarting the client
+	 * gives no new attempts. The pane already shows the failure: only the lock of the account is alerted.
+	 */
+	private void countFailedFaceLiveness(String user) {
+		UserDTO userDTO = loginService.getUserDetail(user);
+		if (userDTO != null) {
+			validateInvalidLogin(userDTO,
+					RegistrationUIConstants.getMessageLanguageSpecific("LIVENESS_FAILED"), false);
+		}
 	}
 
 	private void validateFaceLogin() {
@@ -1010,6 +1024,10 @@ public class LoginController extends BaseController implements Initializable {
 	 * @return boolean
 	 */
 	private boolean validateInvalidLogin(UserDTO userDTO, String errorMessage) {
+		return validateInvalidLogin(userDTO, errorMessage, true);
+	}
+
+	private boolean validateInvalidLogin(UserDTO userDTO, String errorMessage, boolean alertFailure) {
 		LOGGER.info(LoggerConstants.LOG_REG_LOGIN, APPLICATION_NAME, APPLICATION_ID, "Fetching invalid login params");
 
 		int invalidLoginCount = Integer
@@ -1034,7 +1052,9 @@ public class LoginController extends BaseController implements Initializable {
 			case "true":
 				return true;
 			default:
-				generateAlert(RegistrationConstants.ERROR, errorMessage);
+				if (alertFailure) {
+					generateAlert(RegistrationConstants.ERROR, errorMessage);
+				}
 		}
 
 		LOGGER.info("Validated number of login attempts, failed!");

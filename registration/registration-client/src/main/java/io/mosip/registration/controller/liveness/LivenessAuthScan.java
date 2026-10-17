@@ -10,12 +10,14 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import io.mosip.kernel.core.logger.spi.Logger;
 import io.mosip.registration.config.AppConfig;
 import io.mosip.registration.constants.AuditReferenceIdTypes;
 import io.mosip.registration.constants.RegistrationConstants;
+import io.mosip.registration.context.ApplicationContext;
 import io.mosip.registration.controller.device.Streamer;
 import io.mosip.registration.liveness.LivenessAuthGate;
 import io.mosip.registration.liveness.LivenessCapture;
@@ -28,8 +30,10 @@ import io.mosip.registration.liveness.api.Workflow;
 import io.mosip.registration.service.bio.BioService;
 import javafx.animation.PauseTransition;
 import javafx.application.Platform;
+import javafx.beans.value.ChangeListener;
 import javafx.geometry.VPos;
 import javafx.scene.Parent;
+import javafx.scene.Scene;
 import javafx.scene.image.ImageView;
 import javafx.scene.layout.AnchorPane;
 import javafx.scene.layout.GridPane;
@@ -49,8 +53,9 @@ public final class LivenessAuthScan {
 
 	private static final Logger LOGGER = AppConfig.getLogger(LivenessAuthScan.class);
 
-	// After liveness, the capture request and the comparison: beyond the capture timeout of a device.
-	private static final long COMPARISON_LIMIT_MS = 60000;
+	// After liveness, the capture request waits up to the capture timeout of the client; then the comparison.
+	private static final long DEFAULT_CAPTURE_TIMEOUT_MS = 60000;
+	private static final long COMPARISON_MARGIN_MS = 30000;
 
 	// Opening and ending sessions in order, off the JavaFX thread: the engine loads its models on first use.
 	private static final ExecutorService SESSIONS = Executors.newSingleThreadExecutor(task -> {
@@ -65,6 +70,8 @@ public final class LivenessAuthScan {
 	private final Streamer streamer;
 	private final Consumer<String> errorAlert;
 	private final Runnable otherSignIn;
+	private BiConsumer<Workflow, String> onFailedAttempt = (workflow, userId) -> {
+	};
 	private LivenessStatusPane pane;
 	private Scan scan;
 
@@ -83,6 +90,34 @@ public final class LivenessAuthScan {
 		this.streamer = streamer;
 		this.errorAlert = errorAlert;
 		this.otherSignIn = otherSignIn;
+	}
+
+	/**
+	 * Called on the JavaFX thread for each failed attempt, with the workflow and the user of the scan, for example to
+	 * count it as a failed login.
+	 */
+	public void setOnFailedAttempt(BiConsumer<Workflow, String> action) {
+		onFailedAttempt = action == null ? (workflow, userId) -> {
+		} : action;
+	}
+
+	/**
+	 * The time left to the capture request and the comparison once liveness is established: the capture timeout of
+	 * the client ({@code mosip.registration.capture_time_out}, in milliseconds) and a margin.
+	 */
+	static long comparisonLimitMs(Object captureTimeout) {
+		long timeoutMs = DEFAULT_CAPTURE_TIMEOUT_MS;
+		if (captureTimeout != null) {
+			try {
+				long configured = Long.parseLong(String.valueOf(captureTimeout).trim());
+				if (configured > 0) {
+					timeoutMs = configured;
+				}
+			} catch (NumberFormatException exception) {
+				LOGGER.warn("Invalid capture timeout {}, {} ms applied", captureTimeout, DEFAULT_CAPTURE_TIMEOUT_MS);
+			}
+		}
+		return timeoutMs + COMPARISON_MARGIN_MS;
 	}
 
 	/** Liveness applies to the workflow: the screen starts a scan instead of capturing at once. */
@@ -134,6 +169,7 @@ public final class LivenessAuthScan {
 		image.setImage(null);
 		Scan started = new Scan(workflow, config, attempts, userId, image, onPassed);
 		scan = started;
+		image.sceneProperty().addListener(started.sceneListener);
 		SESSIONS.execute(started::open);
 	}
 
@@ -163,6 +199,13 @@ public final class LivenessAuthScan {
 		private volatile boolean ended;
 		private InputStream stream;
 		private PauseTransition watchdog;
+		// Leaving the screen by any way (Home, logout, another page) takes the image out of its scene.
+		private final ChangeListener<Scene> sceneListener = (observable, before, now) -> {
+			if (now == null && scan == this) {
+				scan = null;
+				end();
+			}
+		};
 
 		private Scan(Workflow workflow, LivenessConfig config, AtomicInteger attempts, String userId, ImageView image,
 				Runnable onPassed) {
@@ -222,8 +265,10 @@ public final class LivenessAuthScan {
 		@Override
 		public void onUpdate(LivenessUpdate update) {
 			// Counted on the engine thread, so that an attempt ended by end() counts too.
-			if (update.state() == SessionState.FAILED && counted.compareAndSet(false, true)) {
+			boolean countedNow = update.state() == SessionState.FAILED && counted.compareAndSet(false, true);
+			if (countedNow) {
 				attempts.incrementAndGet();
+				Platform.runLater(() -> onFailedAttempt.accept(workflow, userId));
 			}
 			boolean failed = update.state() == SessionState.FAILED || update.feedback() == FeedbackCode.DEVICE_ERROR;
 			Platform.runLater(() -> {
@@ -252,7 +297,8 @@ public final class LivenessAuthScan {
 					return;
 				}
 				// The comparison ends the scan; if it never runs, the scan still ends.
-				restartWatchdog(COMPARISON_LIMIT_MS);
+				restartWatchdog(comparisonLimitMs(
+						ApplicationContext.getStringValueFromApplicationMap(RegistrationConstants.CAPTURE_TIME_OUT)));
 				capture.captureRequested();
 				gate.arm(workflow, userId, capture);
 				onPassed.run();
@@ -265,11 +311,10 @@ public final class LivenessAuthScan {
 			}
 			ended = true;
 			stopWatchdog();
-			// Only the scan's own stream: another screen may already stream.
-			// Closing it also clears the frame listener of the scan.
-			if (stream != null && streamer.getUrlStream() == stream) {
-				streamer.setUrlStream(null);
-			}
+			image.sceneProperty().removeListener(sceneListener);
+			// Only the scan's own stream, even before its thread reads it: another screen may already stream.
+			// Stopping it while it streams also clears the frame listener of the scan.
+			streamer.stopStream(stream);
 			SESSIONS.execute(() -> {
 				LivenessCapture opened = capture;
 				if (opened != null) {
