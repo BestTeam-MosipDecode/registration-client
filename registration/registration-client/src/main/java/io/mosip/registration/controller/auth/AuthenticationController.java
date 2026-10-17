@@ -623,7 +623,7 @@ public class AuthenticationController extends BaseController implements Initiali
 		if (isReviewer && getRegistrationDTOFromSession() != null) {
 			// Without liveness on the supervisor's face, a photo would approve a registration marked under exception.
 			userAuthenticationTypeList = LivenessService.supervisorModes(userAuthenticationTypeList,
-					getRegistrationDTOFromSession(), false);
+					getRegistrationDTOFromSession(), livenessService.config(Workflow.SUPERVISOR).isEnabled());
 		}
 
 		if (userAuthenticationTypeList.isEmpty()) {
