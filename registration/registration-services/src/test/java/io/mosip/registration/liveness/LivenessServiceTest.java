@@ -16,8 +16,11 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.junit.Test;
@@ -28,6 +31,8 @@ import io.mosip.registration.constants.AuditEvent;
 import io.mosip.registration.constants.Components;
 import io.mosip.registration.constants.RegistrationConstants;
 import io.mosip.registration.dto.RegistrationDTO;
+import io.mosip.registration.dto.UserDTO;
+import io.mosip.registration.dto.UserRoleDTO;
 import io.mosip.registration.liveness.LivenessService.ScanDecision;
 import io.mosip.registration.liveness.api.LivenessEngine;
 import io.mosip.registration.liveness.api.LivenessEventListener;
@@ -140,5 +145,61 @@ public class LivenessServiceTest {
 		registration.getFaceLivenessExceptions().add("guardianBiometrics");
 		LivenessService.addPacketMark(registration, metaData);
 		assertEquals("individualBiometrics,guardianBiometrics", metaData.get("faceLivenessException"));
+	}
+
+	@Test
+	public void theRegistrationIsMarkedBeforeTheCaptureWithoutAnAudit() {
+		RegistrationDTO registration = new RegistrationDTO();
+		LivenessService.markException(registration, "individualBiometrics");
+		assertTrue(LivenessService.requiresSupervisor(registration));
+		org.mockito.Mockito.verifyZeroInteractions(audit);
+	}
+
+	@Test
+	public void theOperatorCannotReviewTheirOwnRegistrationWhateverTheCase() {
+		RegistrationDTO registration = new RegistrationDTO();
+		assertFalse(LivenessService.isValidReviewer(user("jdoe", "REGISTRATION_SUPERVISOR"), "jdoe", registration));
+		assertFalse(LivenessService.isValidReviewer(user("jdoe", "REGISTRATION_SUPERVISOR"), "JDOE", registration));
+		assertFalse(LivenessService.isValidReviewer(null, "jdoe", registration));
+		// Not marked: another user, as in 1.2.0.2.
+		assertTrue(LivenessService.isValidReviewer(user("asmith", "REGISTRATION_OFFICER"), "jdoe", registration));
+	}
+
+	@Test
+	public void aMarkedRegistrationNeedsTheSupervisorRole() {
+		RegistrationDTO registration = new RegistrationDTO();
+		LivenessService.markException(registration, "individualBiometrics");
+		assertFalse(LivenessService.isValidReviewer(user("asmith", "REGISTRATION_OFFICER"), "jdoe", registration));
+		assertFalse(LivenessService.isValidReviewer(user("asmith"), "jdoe", registration));
+		assertTrue(LivenessService.isValidReviewer(user("asmith", "REGISTRATION_OFFICER", "REGISTRATION_SUPERVISOR"),
+				"jdoe", registration));
+	}
+
+	@Test
+	public void theFaceIsNotOfferedToTheSupervisorOfAMarkedRegistrationWithoutLiveness() {
+		RegistrationDTO registration = new RegistrationDTO();
+		List<String> modes = Arrays.asList("PWD", "FACE");
+		assertEquals(modes, LivenessService.supervisorModes(modes, registration, false));
+		LivenessService.markException(registration, "individualBiometrics");
+		assertEquals(Collections.singletonList("PWD"), LivenessService.supervisorModes(modes, registration, false));
+		assertEquals(Collections.singletonList("PWD"),
+				LivenessService.supervisorModes(Arrays.asList("PWD", "face"), registration, false));
+		assertEquals(modes, LivenessService.supervisorModes(modes, registration, true));
+		assertEquals(Collections.emptyList(),
+				LivenessService.supervisorModes(Collections.singletonList("FACE"), registration, false));
+	}
+
+	private static UserDTO user(String id, String... roles) {
+		UserDTO user = new UserDTO();
+		user.setId(id);
+		java.util.Set<UserRoleDTO> userRoles = new java.util.HashSet<>();
+		for (String role : roles) {
+			UserRoleDTO userRole = new UserRoleDTO();
+			userRole.setUsrId(id);
+			userRole.setRoleCode(role);
+			userRoles.add(userRole);
+		}
+		user.setUserRole(userRoles);
+		return user;
 	}
 }
