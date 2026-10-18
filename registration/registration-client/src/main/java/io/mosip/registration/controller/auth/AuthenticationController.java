@@ -35,7 +35,10 @@ import io.mosip.registration.controller.reg.Validations;
 import io.mosip.registration.dto.OSIDataDTO;
 import io.mosip.registration.dto.ResponseDTO;
 import io.mosip.registration.exception.RegBaseCheckedException;
+import io.mosip.registration.controller.liveness.LivenessAuthScan;
+import io.mosip.registration.liveness.LivenessAuthGate;
 import io.mosip.registration.liveness.LivenessService;
+import io.mosip.registration.liveness.api.Workflow;
 import io.mosip.registration.service.bio.BioService;
 import io.mosip.registration.service.login.LoginService;
 import io.mosip.registration.service.security.AuthenticationService;
@@ -206,6 +209,15 @@ public class AuthenticationController extends BaseController implements Initiali
 
 	@Autowired
 	private BioService bioService;
+
+	@Autowired
+	private LivenessService livenessService;
+
+	@Autowired
+	private LivenessAuthGate livenessAuthGate;
+
+	// Operator and supervisor face authentication gated on liveness (docs/workflows.md, section 2.3).
+	private LivenessAuthScan livenessAuthScan;
 
 	private int fingerPrintAuthCount;
 	private int irisAuthCount;
@@ -498,6 +510,27 @@ public class AuthenticationController extends BaseController implements Initiali
 	 * @throws RegBaseCheckedException
 	 */
 	public void validateFace() {
+		Workflow workflow = isReviewer ? Workflow.SUPERVISOR : Workflow.OPERATOR;
+		if (livenessAuthScan().isEnabled(workflow)) {
+			// The face is captured and compared on its own once liveness is established.
+			if (validateInput(faceUserId, null)) {
+				livenessAuthScan().start(workflow, faceUserId.getText(), faceImage, this::compareFace);
+			}
+			return;
+		}
+		compareFace();
+	}
+
+	private LivenessAuthScan livenessAuthScan() {
+		if (livenessAuthScan == null) {
+			livenessAuthScan = new LivenessAuthScan(livenessService, livenessAuthGate, bioService, streamer,
+					key -> generateAlert(RegistrationConstants.ERROR, RegistrationUIConstants.getMessageLanguageSpecific(key)),
+					this::goToPreviousPage);
+		}
+		return livenessAuthScan;
+	}
+
+	private void compareFace() {
 		auditFactory.audit(isReviewer ? AuditEvent.REG_REVIEWER_AUTH_FACE : AuditEvent.REG_OPERATOR_AUTH_FACE,
 				Components.REG_OS_AUTH,
 				faceUserId.getText().isEmpty() ? RegistrationConstants.AUDIT_DEFAULT_USER : faceUserId.getText(),
@@ -547,6 +580,10 @@ public class AuthenticationController extends BaseController implements Initiali
 		taskService.setOnSucceeded(new EventHandler<WorkerStateEvent>() {
 			@Override
 			public void handle(WorkerStateEvent workerStateEvent) {
+				if (livenessAuthScan != null) {
+					// The comparison is done: the liveness scan stops its stream and closes its session.
+					livenessAuthScan.end();
+				}
 				pane.setDisable(false);
 				progressIndicatorPane.setVisible(false);
 				progressIndicator.setVisible(false);
@@ -586,7 +623,7 @@ public class AuthenticationController extends BaseController implements Initiali
 		if (isReviewer && getRegistrationDTOFromSession() != null) {
 			// Without liveness on the supervisor's face, a photo would approve a registration marked under exception.
 			userAuthenticationTypeList = LivenessService.supervisorModes(userAuthenticationTypeList,
-					getRegistrationDTOFromSession(), false);
+					getRegistrationDTOFromSession(), livenessService.config(Workflow.SUPERVISOR).isEnabled());
 		}
 
 		if (userAuthenticationTypeList.isEmpty()) {
@@ -845,6 +882,7 @@ public class AuthenticationController extends BaseController implements Initiali
 	 * @param event - the action event
 	 */
 	public void exitWindow(ActionEvent event) {
+		endLivenessScan();
 		Stage primaryStage = (Stage) ((Node) event.getSource()).getParent().getScene().getWindow();
 		primaryStage.close();
 	}
@@ -860,7 +898,14 @@ public class AuthenticationController extends BaseController implements Initiali
 				+ RegistrationUIConstants.getMessageLanguageSpecific("MINUTES"));
 		stopTimer();
 		isReviewer = false;
+		endLivenessScan();
 		getAuthenticationModes(authType);
+	}
+
+	private void endLivenessScan() {
+		if (livenessAuthScan != null) {
+			livenessAuthScan.end();
+		}
 	}
 
 	private OSIDataDTO getOSIData() {
@@ -878,6 +923,7 @@ public class AuthenticationController extends BaseController implements Initiali
 	}
 
 	public void goToPreviousPage() {
+		endLivenessScan();
 		auditFactory.audit(AuditEvent.REG_PREVIEW_BACK, Components.REG_PREVIEW, SessionContext.userId(),
 				AuditReferenceIdTypes.USER_ID.getReferenceTypeId());
 		/*if (getRegistrationDTOFromSession().getSelectionListDTO() != null) {

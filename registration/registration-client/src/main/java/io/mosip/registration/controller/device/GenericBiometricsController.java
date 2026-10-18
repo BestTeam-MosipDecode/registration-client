@@ -790,9 +790,12 @@ public class GenericBiometricsController extends BaseController {
 		scan.ended = true;
 		livenessScan = null;
 		scan.stopWatchdog();
-		// Only the scan's own stream: after a logout, the shared streamer may already show another screen's stream.
-		if (scan.stream == null || streamer.getUrlStream() == scan.stream) {
+		// Only the scan's own stream, even before its thread reads it: after a logout, the shared streamer may already
+		// show another screen's stream.
+		if (scan.stream == null) {
 			streamer.setUrlStream(null);
+		} else {
+			streamer.stopStream(scan.stream);
 		}
 		SessionContext.setAutoLogout(true);
 		scan.control.getNode().setDisable(false);

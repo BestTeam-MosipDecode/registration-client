@@ -69,6 +69,8 @@ import io.mosip.registration.dto.schema.UiFieldDTO;
 import io.mosip.registration.entity.UserBiometric;
 import io.mosip.registration.exception.PreConditionCheckException;
 import io.mosip.registration.exception.RegBaseCheckedException;
+import io.mosip.registration.liveness.LivenessAuthGate;
+import io.mosip.registration.liveness.api.Workflow;
 import io.mosip.registration.exception.RemapException;
 import io.mosip.registration.mdm.dto.MDMRequestDto;
 import io.mosip.registration.scheduler.SchedulerUtil;
@@ -213,6 +215,9 @@ public class BaseController {
 
 	@Autowired
 	private BioService bioService;
+
+	@Autowired
+	private LivenessAuthGate livenessAuthGate;
 
 	@Autowired
 	private DocumentScanController documentScanController;
@@ -1711,6 +1716,15 @@ public class BaseController {
 	 * @throws RegBaseCheckedException
 	 */
 	protected boolean captureAndValidateFace(String userId, boolean isPacketAuth, boolean isReviewer) throws RegBaseCheckedException, IOException {
+		return captureAndValidateFace(userId, isPacketAuth, isReviewer, isReviewer ? Workflow.SUPERVISOR : Workflow.OPERATOR);
+	}
+
+	/**
+	 * Same, with the liveness policy of the workflow: the captured face is compared only after the liveness gate
+	 * accepted it (docs/workflows.md, section 2.3).
+	 */
+	protected boolean captureAndValidateFace(String userId, boolean isPacketAuth, boolean isReviewer, Workflow workflow)
+			throws RegBaseCheckedException, IOException {
 		MDMRequestDto mdmRequestDto = new MDMRequestDto(RegistrationConstants.FACE_FULLFACE, null, "Registration",
 				io.mosip.registration.context.ApplicationContext
 						.getStringValueFromApplicationMap(RegistrationConstants.SERVER_ACTIVE_PROFILE),
@@ -1721,7 +1735,13 @@ public class BaseController {
 
 		List<BiometricsDto> biometrics = bioService.captureModalityForAuth(mdmRequestDto);
 
+		if (!livenessAuthGate.accept(workflow, userId, biometrics)) {
+			return false;
+		}
 		boolean match = authenticationService.authValidator(userId, SingleType.FACE.value(), biometrics);
+		if (match) {
+			livenessAuthGate.authenticated(workflow, userId);
+		}
 		if (match && isPacketAuth) {
 			addOperatorBiometrics(biometrics, isReviewer);
 		}
