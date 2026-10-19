@@ -96,6 +96,7 @@ public class RegistrationDTO {
 		this.SDK_SCORES.clear();
 		this.ATTEMPTS.clear();
 		this.SELECTED_CODES.clear();
+		this.faceLivenessExceptions.clear();
 
 		List<String> allKeys = new ArrayList<>();
 		allKeys.addAll(demographics.keySet());
@@ -280,6 +281,10 @@ public class RegistrationDTO {
 
 		String key = String.format("%s_%s", fieldId, modality.name());
 		this.ATTEMPTS.remove(key);
+		// The liveness exception mark goes with the face of its field.
+		if (modality == Modality.FACE) {
+			this.faceLivenessExceptions.remove(fieldId);
+		}
 
 		keys.clear();
 		keys.addAll(this.BIO_SCORES.keySet());

@@ -189,6 +189,33 @@ public class LivenessServiceTest {
 				LivenessService.supervisorModes(Collections.singletonList("FACE"), registration, false));
 	}
 
+	@Test
+	public void aMarkedFieldIsCapturedAgainUnderTheException() {
+		RegistrationDTO registration = new RegistrationDTO();
+		LivenessConfig resident = service.config(Workflow.RESIDENT);
+		assertFalse(LivenessService.capturesUnderException(registration, "individualBiometrics", resident, 3));
+		LivenessService.markException(registration, "individualBiometrics");
+		assertTrue(LivenessService.capturesUnderException(registration, "individualBiometrics", resident, 3));
+		assertFalse(LivenessService.capturesUnderException(registration, "guardianBiometrics", resident, 3));
+		assertFalse(LivenessService.capturesUnderException(registration, "individualBiometrics", resident, 2));
+		settings.put(P + "resident.on_max_attempts", "BLOCK");
+		assertFalse(LivenessService.capturesUnderException(registration, "individualBiometrics",
+				service.config(Workflow.RESIDENT), 3));
+	}
+
+	@Test
+	public void theMarkGoesWithTheFaceOfItsField() {
+		RegistrationDTO registration = new RegistrationDTO();
+		LivenessService.markException(registration, "individualBiometrics");
+		LivenessService.markException(registration, "guardianBiometrics");
+		registration.clearBIOCache("individualBiometrics", "leftEye");
+		assertTrue(registration.getFaceLivenessExceptions().contains("individualBiometrics"));
+		registration.clearBIOCache("individualBiometrics", "face");
+		assertEquals(Collections.singleton("guardianBiometrics"), registration.getFaceLivenessExceptions());
+		registration.clearRegistrationDto();
+		assertFalse(LivenessService.requiresSupervisor(registration));
+	}
+
 	private static UserDTO user(String id, String... roles) {
 		UserDTO user = new UserDTO();
 		user.setId(id);
