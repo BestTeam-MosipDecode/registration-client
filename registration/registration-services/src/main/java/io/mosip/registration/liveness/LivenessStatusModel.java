@@ -85,7 +85,7 @@ public final class LivenessStatusModel {
 	public static LivenessStatusModel maxAttempts(Workflow workflow, boolean exceptionAllowed) {
 		Builder b = new Builder().tone(Tone.FAILURE).status("livenessNotVerified");
 		if (workflow != Workflow.RESIDENT) {
-			b.band("LIVENESS_MAX_ATTEMPTS_AUTH");
+			b.band(LivenessMessages.authMaxAttemptsKey(workflow));
 			b.otherSignIn = true;
 		} else if (exceptionAllowed) {
 			b.band("LIVENESS_MAX_ATTEMPTS").detail("LIVENESS_EXCEPTION_INFO");

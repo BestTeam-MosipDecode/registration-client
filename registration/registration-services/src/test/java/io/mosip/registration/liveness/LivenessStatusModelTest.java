@@ -209,7 +209,9 @@ public class LivenessStatusModelTest {
 	public void authenticationNeverOffersTheExceptionProcess() {
 		for (Workflow workflow : new Workflow[] { Workflow.OPERATOR, Workflow.SUPERVISOR }) {
 			LivenessStatusModel model = LivenessStatusModel.maxAttempts(workflow, true);
-			assertEquals("LIVENESS_MAX_ATTEMPTS_AUTH", model.band().key());
+			String expected = workflow == Workflow.SUPERVISOR ? "LIVENESS_MAX_ATTEMPTS_SUPERVISOR"
+					: "LIVENESS_MAX_ATTEMPTS_AUTH";
+			assertEquals(expected, model.band().key());
 			assertTrue(model.otherSignIn());
 			assertFalse(model.continueUnderException());
 		}
