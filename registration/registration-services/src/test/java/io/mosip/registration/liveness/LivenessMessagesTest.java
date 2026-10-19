@@ -85,7 +85,7 @@ public class LivenessMessagesTest {
 				LivenessMessages.keys(exhausted, Workflow.RESIDENT));
 		assertEquals(Collections.singletonList("LIVENESS_MAX_ATTEMPTS_AUTH"),
 				LivenessMessages.keys(exhausted, Workflow.OPERATOR));
-		assertEquals(Collections.singletonList("LIVENESS_MAX_ATTEMPTS_AUTH"),
+		assertEquals(Collections.singletonList("LIVENESS_MAX_ATTEMPTS_SUPERVISOR"),
 				LivenessMessages.keys(exhausted, Workflow.SUPERVISOR));
 	}
 }

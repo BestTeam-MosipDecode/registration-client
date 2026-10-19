@@ -58,7 +58,7 @@ public final class LivenessMessages {
 			keys.add("LIVENESS_DEVICE_UNAVAILABLE");
 			break;
 		case MAX_ATTEMPTS_EXCEEDED:
-			keys.add(workflow == Workflow.RESIDENT ? "LIVENESS_MAX_ATTEMPTS" : "LIVENESS_MAX_ATTEMPTS_AUTH");
+			keys.add(workflow == Workflow.RESIDENT ? "LIVENESS_MAX_ATTEMPTS" : authMaxAttemptsKey(workflow));
 			break;
 		case FAILED:
 			addFailure(update, keys);
@@ -86,5 +86,10 @@ public final class LivenessMessages {
 
 	static String tipKey(GuidanceTip tip) {
 		return tip == GuidanceTip.HOLD_STILL ? "LIVENESS_HOLD_STILL" : "LIVENESS_TIP_" + tip.name();
+	}
+
+	/** Attempts exhausted in an authentication: a supervisor is not told to contact a supervisor. */
+	static String authMaxAttemptsKey(Workflow workflow) {
+		return workflow == Workflow.SUPERVISOR ? "LIVENESS_MAX_ATTEMPTS_SUPERVISOR" : "LIVENESS_MAX_ATTEMPTS_AUTH";
 	}
 }
