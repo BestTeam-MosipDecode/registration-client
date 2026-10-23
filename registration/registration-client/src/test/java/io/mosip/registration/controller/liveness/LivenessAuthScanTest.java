@@ -43,9 +43,12 @@ import io.mosip.registration.liveness.api.SessionState;
 import io.mosip.registration.liveness.api.Workflow;
 import io.mosip.registration.service.bio.BioService;
 import javafx.application.Platform;
+import javafx.scene.Node;
 import javafx.scene.Scene;
+import javafx.scene.control.Button;
 import javafx.scene.image.ImageView;
 import javafx.scene.layout.AnchorPane;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
 
 /** The scan of a face authentication screen: its end when the screen is left, its stream and its attempts. */
@@ -118,13 +121,30 @@ public class LivenessAuthScanTest {
 		assertTrue(failedAttempts.isEmpty());
 	}
 
+	@Test(timeout = 20000)
+	public void afterTheLastAttemptAnEnrolmentOffersNoOtherSignIn() throws Exception {
+		Assume.assumeTrue("no display", toolkit);
+		assertEquals(1, buttonsShownAfterTheLastAttempt(false));
+		assertEquals(0, buttonsShownAfterTheLastAttempt(true));
+	}
+
+	@Test(timeout = 20000)
+	public void closingEndsTheScanAndTakesThePaneOffTheScreen() throws Exception {
+		Assume.assumeTrue("no display", toolkit);
+		ImageView image = startedScan();
+		Pane screen = (Pane) image.getParent();
+		assertEquals(1, panes(screen));
+		onFx(scan::close);
+		verify(streamer, timeout(5000)).stopStream(stream);
+		verify(capture, timeout(5000)).abort();
+		assertEquals(0, panes(screen));
+	}
+
 	private LivenessAuthScan scan;
 
 	/** A scan of {@code jdoe} at login, whose stream has started. */
 	private ImageView startedScan() throws Exception {
-		LivenessConfig config = new LivenessConfig(Workflow.OPERATOR, true, OnMaxAttempts.BLOCK,
-				LivenessPolicy.defaults());
-		when(livenessService.config(Workflow.OPERATOR)).thenReturn(config);
+		LivenessConfig config = config();
 		when(livenessService.startScan(eq(config), anyInt(), eq("jdoe"), anyString(), any())).thenReturn(capture);
 		when(capture.open(any())).thenReturn(stream);
 		scan = new LivenessAuthScan(livenessService, gate, mock(BioService.class), streamer, key -> {
@@ -140,6 +160,42 @@ public class LivenessAuthScanTest {
 		});
 		verify(streamer, timeout(5000)).startStream(stream, image, null);
 		return image;
+	}
+
+	private LivenessConfig config() {
+		LivenessConfig config = new LivenessConfig(Workflow.OPERATOR, true, OnMaxAttempts.BLOCK,
+				LivenessPolicy.defaults());
+		when(livenessService.config(Workflow.OPERATOR)).thenReturn(config);
+		return config;
+	}
+
+	/** Starts a scan for a user with no attempt left and counts the buttons its pane shows. */
+	private long buttonsShownAfterTheLastAttempt(boolean enrolment) throws Exception {
+		String user = enrolment ? "enrolled" : "signing-in";
+		gate.attempts(Workflow.OPERATOR, user).set(config().getPolicy().maxAttempts());
+		LivenessAuthScan exhausted = enrolment
+				? LivenessAuthScan.forEnrolment(livenessService, gate, mock(BioService.class), streamer, key -> {
+				})
+				: new LivenessAuthScan(livenessService, gate, mock(BioService.class), streamer, key -> {
+				}, () -> {
+				});
+		// Texts are their keys: the messages of the client need its application context.
+		exhausted.paneFactory = () -> new LivenessStatusPane(Workflow.OPERATOR, key -> key, key -> key);
+		ImageView image = new ImageView();
+		AnchorPane screen = new AnchorPane(image);
+		onFx(() -> {
+			new Scene(screen);
+			exhausted.start(Workflow.OPERATOR, user, image, () -> {
+			});
+		});
+		return screen.getChildren().stream().filter(LivenessStatusPane.class::isInstance)
+				.flatMap(pane -> ((Pane) pane).getChildren().stream()).filter(Node::isVisible)
+				.filter(HBox.class::isInstance).flatMap(box -> ((HBox) box).getChildren().stream())
+				.filter(button -> button instanceof Button && button.isVisible()).count();
+	}
+
+	private static long panes(Pane screen) {
+		return screen.getChildren().stream().filter(LivenessStatusPane.class::isInstance).count();
 	}
 
 	private LivenessCapture.Callbacks callbacks() throws Exception {
