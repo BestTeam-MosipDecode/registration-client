@@ -6,7 +6,11 @@
 package io.mosip.registration.liveness;
 
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import io.mosip.biometrics.util.ConvertRequestDto;
@@ -17,6 +21,7 @@ import io.mosip.registration.exception.RegBaseCheckedException;
 import io.mosip.registration.liveness.api.CaptureCheck;
 import io.mosip.registration.liveness.api.DeviceEvent;
 import io.mosip.registration.liveness.api.FeedbackCode;
+import io.mosip.registration.liveness.api.LivenessEvent;
 import io.mosip.registration.liveness.api.LivenessEventListener;
 import io.mosip.registration.liveness.api.LivenessSession;
 import io.mosip.registration.liveness.api.LivenessUpdate;
@@ -51,9 +56,31 @@ public class LivenessCapture implements AutoCloseable {
 	private final Callbacks screen;
 	private final ImageConverter converter;
 	private final AtomicBoolean passAnnounced = new AtomicBoolean();
+	// The check of this attempt, for the packet: its challenges in order, its attempt and the models.
+	private final List<Map<String, Object>> challenges = new CopyOnWriteArrayList<>();
+	private volatile int attempt;
+	private volatile int maxAttempts;
+	private volatile String modelSetVersion;
 	private final LivenessEventListener listener = new LivenessEventListener() {
 		@Override
+		public void onEvent(LivenessEvent event) {
+			attempt = event.attempt();
+			modelSetVersion = event.modelSetVersion();
+			if (event.type() == LivenessEvent.Type.SESSION_STARTED) {
+				challenges.clear();
+			} else if (event.type() == LivenessEvent.Type.CHALLENGE_PASSED
+					|| event.type() == LivenessEvent.Type.CHALLENGE_FAILED) {
+				Map<String, Object> challenge = new LinkedHashMap<>();
+				challenge.put("type", event.challenge().map(Enum::name).orElse(null));
+				challenge.put("result", event.type() == LivenessEvent.Type.CHALLENGE_PASSED ? "PASSED"
+						: event.failureReason().map(Enum::name).orElse("FAILED"));
+				challenges.add(challenge);
+			}
+		}
+
+		@Override
 		public void onUpdate(LivenessUpdate update) {
+			maxAttempts = update.maxAttempts();
 			screen.onUpdate(update);
 			if (update.state() == SessionState.PASSED && update.feedback() == FeedbackCode.HOLD_STILL
 					&& passAnnounced.compareAndSet(false, true)) {
@@ -147,6 +174,22 @@ public class LivenessCapture implements AutoCloseable {
 			return session.checkCapture((BgrImage) null);
 		}
 		return checkCapture(isoRecords.get(0));
+	}
+
+	/**
+	 * The check of this scan as carried in the packet once its face is stored (answer of MOSIP of 23 October 2026):
+	 * the decision, the attempt, whether the passive score came from the device, the challenges performed with their
+	 * result, and the version of the models. No image and no score.
+	 */
+	public Map<String, Object> packetDetails() {
+		Map<String, Object> details = new LinkedHashMap<>();
+		details.put("decision", "PASSED");
+		details.put("attempt", attempt);
+		details.put("maxAttempts", maxAttempts);
+		details.put("passiveScore", frameSource != null && frameSource.deviceScored() ? "DEVICE" : "CLIENT");
+		details.put("challenges", new ArrayList<>(challenges));
+		details.put("modelSetVersion", modelSetVersion);
+		return details;
 	}
 
 	/** The captured image was accepted: a new scan needs a new capture. */

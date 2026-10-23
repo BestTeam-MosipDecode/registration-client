@@ -26,6 +26,9 @@ import java.util.Map;
 import org.junit.Test;
 import org.mockito.ArgumentCaptor;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import io.mosip.registration.audit.AuditManagerService;
 import io.mosip.registration.constants.AuditEvent;
 import io.mosip.registration.constants.Components;
@@ -145,6 +148,36 @@ public class LivenessServiceTest {
 		registration.getFaceLivenessExceptions().add("guardianBiometrics");
 		LivenessService.addPacketMark(registration, metaData);
 		assertEquals("individualBiometrics,guardianBiometrics", metaData.get("faceLivenessException"));
+	}
+
+	@Test
+	public void thePacketCarriesTheCheckOfEachFace() throws Exception {
+		RegistrationDTO registration = new RegistrationDTO();
+		Map<String, Object> challenge = new LinkedHashMap<>();
+		challenge.put("type", "BLINK");
+		challenge.put("result", "PASSED");
+		Map<String, Object> details = new LinkedHashMap<>();
+		details.put("decision", "PASSED");
+		details.put("challenges", Collections.singletonList(challenge));
+		LivenessService.recordCheck(registration, "individualBiometrics", details);
+		Map<String, String> metaData = new LinkedHashMap<>();
+		LivenessService.addPacketMark(registration, metaData);
+		assertFalse("not marked", metaData.containsKey("faceLivenessException"));
+		JsonNode carried = new ObjectMapper().readTree(metaData.get("faceLiveness")).path("individualBiometrics");
+		assertEquals("PASSED", carried.path("decision").asText());
+		assertEquals("BLINK", carried.path("challenges").path(0).path("type").asText());
+	}
+
+	@Test
+	public void aCaptureUnderExceptionIsCarriedAsSuchInTheCheck() throws Exception {
+		RegistrationDTO registration = new RegistrationDTO();
+		service.recordExceptionCapture(registration, "individualBiometrics", 3);
+		Map<String, String> metaData = new LinkedHashMap<>();
+		LivenessService.addPacketMark(registration, metaData);
+		JsonNode carried = new ObjectMapper().readTree(metaData.get("faceLiveness")).path("individualBiometrics");
+		assertEquals("EXCEPTION", carried.path("decision").asText());
+		assertEquals(3, carried.path("attempts").asInt());
+		assertEquals("individualBiometrics", metaData.get("faceLivenessException"));
 	}
 
 	@Test

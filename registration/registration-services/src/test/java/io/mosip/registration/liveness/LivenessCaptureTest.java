@@ -14,13 +14,17 @@ import static org.junit.Assert.assertTrue;
 import java.io.EOFException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.Test;
 
+import io.mosip.registration.liveness.active.ChallengeType;
 import io.mosip.registration.liveness.api.CaptureCheck;
 import io.mosip.registration.liveness.api.DeviceEvent;
 import io.mosip.registration.liveness.api.FailureReason;
 import io.mosip.registration.liveness.api.FeedbackCode;
+import io.mosip.registration.liveness.api.LivenessEvent;
+import io.mosip.registration.liveness.api.LivenessEventListener;
 import io.mosip.registration.liveness.api.LivenessSession;
 import io.mosip.registration.liveness.api.LivenessUpdate;
 import io.mosip.registration.liveness.api.SessionState;
@@ -116,6 +120,43 @@ public class LivenessCaptureTest {
 		});
 		capture.attach(session);
 		return capture;
+	}
+
+	private static LivenessEvent event(LivenessEvent.Type type, FailureReason reason, ChallengeType challenge) {
+		return new LivenessEvent(type, Workflow.RESIDENT, 2, 0, "1.1.0", reason, challenge, null);
+	}
+
+	@Test
+	@SuppressWarnings("unchecked")
+	public void theDetailsForThePacketListTheChallengesOfTheAttemptWithoutAnyScore() {
+		LivenessCapture capture = capture();
+		LivenessEventListener listener = capture.listener();
+		listener.onUpdate(update(SessionState.PASSIVE_CHECK, FeedbackCode.CHECKING, null, false, false));
+		listener.onEvent(event(LivenessEvent.Type.SESSION_STARTED, null, null));
+		capture.frameListener().onFrame(new byte[] { 1 }, 0.97);
+		listener.onEvent(event(LivenessEvent.Type.ACTIVE_TRIGGERED, null, null));
+		listener.onEvent(event(LivenessEvent.Type.CHALLENGE_PASSED, null, ChallengeType.BLINK));
+		listener.onEvent(event(LivenessEvent.Type.CHALLENGE_PASSED, null, ChallengeType.TURN_LEFT));
+
+		Map<String, Object> details = capture.packetDetails();
+		assertEquals("PASSED", details.get("decision"));
+		assertEquals(2, details.get("attempt"));
+		assertEquals(3, details.get("maxAttempts"));
+		assertEquals("DEVICE", details.get("passiveScore"));
+		assertEquals("1.1.0", details.get("modelSetVersion"));
+		List<Map<String, Object>> challenges = (List<Map<String, Object>>) details.get("challenges");
+		assertEquals(2, challenges.size());
+		assertEquals("BLINK", challenges.get(0).get("type"));
+		assertEquals("PASSED", challenges.get(0).get("result"));
+		assertEquals("TURN_LEFT", challenges.get(1).get("type"));
+		assertFalse("no score in the packet", details.toString().contains("0.97"));
+	}
+
+	@Test
+	public void withoutAScoreOfTheDeviceThePassiveScoreIsTheOneOfTheClient() {
+		LivenessCapture capture = capture();
+		capture.frameListener().onFrame(new byte[] { 1 });
+		assertEquals("CLIENT", capture.packetDetails().get("passiveScore"));
 	}
 
 	@Test

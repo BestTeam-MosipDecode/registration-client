@@ -66,6 +66,8 @@ public class RegistrationDTO {
 	private Map<String, BiometricsException> biometricExceptions = new HashMap<>();
 	// Face fields captured under the liveness exception process: a supervisor authenticates at submission.
 	private Set<String> faceLivenessExceptions = new LinkedHashSet<>();
+	// Liveness check of each face field, carried in the packet: decision, attempt and challenges, no image and no score.
+	private Map<String, Map<String, Object>> faceLivenessChecks = new LinkedHashMap<>();
 
 	private List<BiometricsDto> supervisorBiometrics = new ArrayList<>();
 	private List<BiometricsDto> officerBiometrics = new ArrayList<>();
@@ -97,6 +99,7 @@ public class RegistrationDTO {
 		this.ATTEMPTS.clear();
 		this.SELECTED_CODES.clear();
 		this.faceLivenessExceptions.clear();
+		this.faceLivenessChecks.clear();
 
 		List<String> allKeys = new ArrayList<>();
 		allKeys.addAll(demographics.keySet());
@@ -284,6 +287,7 @@ public class RegistrationDTO {
 		// The liveness exception mark goes with the face of its field.
 		if (modality == Modality.FACE) {
 			this.faceLivenessExceptions.remove(fieldId);
+			this.faceLivenessChecks.remove(fieldId);
 		}
 
 		keys.clear();

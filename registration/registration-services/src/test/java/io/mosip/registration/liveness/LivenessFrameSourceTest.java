@@ -40,6 +40,12 @@ public class LivenessFrameSourceTest {
 		}
 
 		@Override
+		public void submit(byte[] encodedFrame, long timestampMs, double deviceScore) {
+			frames.add(encodedFrame);
+			calls.add("frame@" + timestampMs + " device score " + deviceScore);
+		}
+
+		@Override
 		public void deviceEvent(DeviceEvent event, long timestampMs) {
 			calls.add(event + "@" + timestampMs);
 		}
@@ -87,6 +93,15 @@ public class LivenessFrameSourceTest {
 		source.onFrame(jpeg);
 		assertSame(jpeg, session.frames.get(0));
 		assertEquals("frame@42", session.calls.get(0));
+	}
+
+	@Test
+	public void theScoreOfTheDeviceGoesToTheSessionWithItsFrame() {
+		byte[] jpeg = { (byte) 0xFF, (byte) 0xD8 };
+		source.onFrame(jpeg, 0.25);
+		source.onFrame(jpeg, null);
+		assertEquals("frame@42 device score 0.25", session.calls.get(0));
+		assertEquals("frame@42", session.calls.get(1));
 	}
 
 	@Test

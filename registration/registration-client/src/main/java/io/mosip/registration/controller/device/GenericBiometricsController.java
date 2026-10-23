@@ -1077,6 +1077,11 @@ public class GenericBiometricsController extends BaseController {
 								fxControl.getUiSchemaDTO().getId(), attempts == null ? 0 : attempts.get());
 					}
 					fxControl.setData(biometricsMap);
+					if (scanOfCapture != null) {
+						// The check of the stored face goes with the packet: challenges performed, attempt, models.
+						LivenessService.recordCheck(getRegistrationDTOFromSession(), fxControl.getUiSchemaDTO().getId(),
+								scanOfCapture.capture.packetDetails());
+					}
 					LOGGER.debug("Completed Saving filtered biometrics into registration DTO");
 					addStreamImageAndScoreToCache(fxControl.getUiSchemaDTO().getId(), currentModality, biometricsMap.values(),
 							getRegistrationDTOFromSession().ATTEMPTS.get(String.format("%s_%s", fxControl.getUiSchemaDTO().getId(), currentModality)));

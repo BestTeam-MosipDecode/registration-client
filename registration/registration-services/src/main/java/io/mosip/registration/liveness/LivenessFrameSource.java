@@ -29,6 +29,7 @@ public class LivenessFrameSource implements StreamFrameListener {
 	private final LivenessSession session;
 	private final LongSupplier clock;
 	private volatile boolean captureRequested;
+	private volatile boolean deviceScored;
 
 	public LivenessFrameSource(LivenessSession session) {
 		this(session, LivenessFrameSource::monotonicMillis);
@@ -62,6 +63,22 @@ public class LivenessFrameSource implements StreamFrameListener {
 	@Override
 	public void onFrame(byte[] jpeg) {
 		session.submit(jpeg, clock.getAsLong());
+	}
+
+	/** The session uses the passive score of the device instead of its own, on the frames it can use. */
+	@Override
+	public void onFrame(byte[] jpeg, Double livenessScore) {
+		if (livenessScore == null) {
+			onFrame(jpeg);
+		} else {
+			deviceScored = true;
+			session.submit(jpeg, clock.getAsLong(), livenessScore);
+		}
+	}
+
+	/** The device sent a passive score with at least one frame of the stream. */
+	boolean deviceScored() {
+		return deviceScored;
 	}
 
 	/**
