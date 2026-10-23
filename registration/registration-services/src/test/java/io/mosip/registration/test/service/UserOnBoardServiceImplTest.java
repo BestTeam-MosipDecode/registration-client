@@ -1,6 +1,8 @@
 package io.mosip.registration.test.service;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 
 import java.net.SocketTimeoutException;
 import java.security.NoSuchAlgorithmException;
@@ -60,6 +62,7 @@ import io.mosip.registration.context.SessionContext;
 import io.mosip.registration.context.SessionContext.UserContext;
 import io.mosip.registration.dao.RegistrationCenterDAO;
 import io.mosip.registration.dao.UserOnboardDAO;
+import io.mosip.registration.dto.ResponseDTO;
 import io.mosip.registration.dto.packetmanager.BiometricsDto;
 import io.mosip.registration.entity.MachineMaster;
 import io.mosip.registration.exception.ConnectionException;
@@ -275,6 +278,20 @@ public class UserOnBoardServiceImplTest {
 	
 	@Test
 	public void userOnBoardFailure() throws HttpClientErrorException, SocketTimeoutException, RegBaseCheckedException, ConnectionException, NoSuchAlgorithmException, CertificateEncodingException, BiometricException {
+		LinkedHashMap<String, Object> respMap = new LinkedHashMap<>();
+		respMap.put(RegistrationConstants.ON_BOARD_AUTH_STATUS, false);
+		assertNotNull(onBoardFailure(respMap).getErrorResponseDTOs());
+	}
+
+	/** IDA sends its errors without a response object: the onboarding fails with the IDA message. */
+	@Test
+	public void userOnBoardFailureWithoutResponse() throws HttpClientErrorException, SocketTimeoutException, RegBaseCheckedException, ConnectionException, NoSuchAlgorithmException, CertificateEncodingException, BiometricException {
+		ResponseDTO responseDTO = onBoardFailure(null);
+		assertNull(responseDTO.getSuccessResponseDTO());
+		assertEquals("User Onboard Failed", responseDTO.getErrorResponseDTOs().get(0).getMessage());
+	}
+
+	private ResponseDTO onBoardFailure(LinkedHashMap<String, Object> respMap) throws HttpClientErrorException, SocketTimeoutException, RegBaseCheckedException, ConnectionException, NoSuchAlgorithmException, CertificateEncodingException, BiometricException {
 		Mockito.when(serviceDelegateUtil.prepareURLByHostName(Mockito.anyString())).thenReturn("https://dev.mosip.net");
 		KeyPairGenerateResponseDto certificateDto = new KeyPairGenerateResponseDto();
 		Mockito.when(keymanagerService.getCertificate(Mockito.anyString(), Mockito.any())).thenReturn(certificateDto);
@@ -334,8 +351,6 @@ public class UserOnBoardServiceImplTest {
 		Mockito.when(cryptoCore.asymmetricEncrypt(Mockito.any(), Mockito.any())).thenReturn("test".getBytes());
 		
 		LinkedHashMap<String, Object> onBoardResponse = new LinkedHashMap<>();
-		LinkedHashMap<String, Object> respMap = new LinkedHashMap<>();
-		respMap.put(RegistrationConstants.ON_BOARD_AUTH_STATUS, false);
 		List<LinkedHashMap<String, Object>> errors = new ArrayList<>();
 		LinkedHashMap<String, Object> rMap = new LinkedHashMap<>();
 		rMap.put("errorMessage", "User Onboard Failed");
@@ -343,8 +358,8 @@ public class UserOnBoardServiceImplTest {
 		onBoardResponse.put(RegistrationConstants.RESPONSE, respMap);
 		onBoardResponse.put(RegistrationConstants.ERRORS, errors);
 		Mockito.when(serviceDelegateUtil.post(Mockito.anyString(), Mockito.any(), Mockito.anyString())).thenReturn(onBoardResponse);
-		
-		assertNotNull(userOnboardServiceImpl.validateWithIDAuthAndSave(biometrics).getErrorResponseDTOs());		
+
+		return userOnboardServiceImpl.validateWithIDAuthAndSave(biometrics);
 	}
 
 	
