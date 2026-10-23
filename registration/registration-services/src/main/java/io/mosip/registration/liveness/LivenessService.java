@@ -6,12 +6,16 @@
 package io.mosip.registration.liveness;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import io.mosip.kernel.core.logger.spi.Logger;
 import io.mosip.registration.audit.AuditManagerService;
@@ -44,6 +48,9 @@ public class LivenessService {
 	 * Provisional: how the mark travels in the packet is to be confirmed with the mentors (Q15).
 	 */
 	static final String PACKET_MARK = "faceLivenessException";
+	// Meta data entry of the packet with the liveness check of each face field (answer of MOSIP of 23 October 2026).
+	static final String PACKET_CHECKS = "faceLiveness";
+	private static final ObjectMapper JSON = new ObjectMapper();
 
 	/** What the next scan of a capture does. */
 	public enum ScanDecision {
@@ -115,6 +122,10 @@ public class LivenessService {
 	 */
 	public void recordExceptionCapture(RegistrationDTO registration, String fieldId, int attemptsUsed) {
 		markException(registration, fieldId);
+		Map<String, Object> details = new LinkedHashMap<>();
+		details.put("decision", "EXCEPTION");
+		details.put("attempts", attemptsUsed);
+		recordCheck(registration, fieldId, details);
 		try {
 			auditManagerService.audit(AuditEvent.LIVENESS_EXCEPTION_CAPTURE, Components.LIVENESS,
 					registration.getRegistrationId(), AuditReferenceIdTypes.REGISTRATION_ID.getReferenceTypeId(),
@@ -183,10 +194,28 @@ public class LivenessService {
 		return allowed;
 	}
 
-	/** Adds the exception mark to the meta data of the packet, only for a marked registration. */
+	/**
+	 * The liveness check of the face stored for the field, carried in the packet: its details from
+	 * {@link LivenessCapture#packetDetails}, or the exception process. A new capture of the field replaces it.
+	 */
+	public static void recordCheck(RegistrationDTO registration, String fieldId, Map<String, Object> details) {
+		registration.getFaceLivenessChecks().put(fieldId, details);
+	}
+
+	/**
+	 * Adds to the meta data of the packet the exception mark, only for a marked registration, and the liveness check
+	 * of each face field, as JSON.
+	 */
 	public static void addPacketMark(RegistrationDTO registration, Map<String, String> metaData) {
 		if (requiresSupervisor(registration)) {
 			metaData.put(PACKET_MARK, String.join(",", registration.getFaceLivenessExceptions()));
+		}
+		if (!registration.getFaceLivenessChecks().isEmpty()) {
+			try {
+				metaData.put(PACKET_CHECKS, JSON.writeValueAsString(registration.getFaceLivenessChecks()));
+			} catch (JsonProcessingException exception) {
+				LOGGER.error("Face liveness checks not added to the packet", exception);
+			}
 		}
 	}
 
