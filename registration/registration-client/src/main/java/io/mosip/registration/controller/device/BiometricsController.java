@@ -39,6 +39,7 @@ import io.mosip.registration.constants.RegistrationUIConstants;
 import io.mosip.registration.context.ApplicationContext;
 import io.mosip.registration.context.SessionContext;
 import io.mosip.registration.controller.BaseController;
+import io.mosip.registration.controller.liveness.LivenessAuthScan;
 import io.mosip.registration.controller.reg.UserOnboardParentController;
 import io.mosip.registration.dao.UserDetailDAO;
 import io.mosip.registration.dto.packetmanager.BiometricsDto;
@@ -46,6 +47,9 @@ import io.mosip.registration.entity.UserBiometric;
 import io.mosip.registration.enums.Modality;
 import io.mosip.registration.exception.RegBaseCheckedException;
 import io.mosip.registration.exception.RegistrationExceptionConstants;
+import io.mosip.registration.liveness.LivenessAuthGate;
+import io.mosip.registration.liveness.LivenessService;
+import io.mosip.registration.liveness.api.Workflow;
 import io.mosip.registration.mdm.dto.Biometric;
 import io.mosip.registration.mdm.dto.MDMRequestDto;
 import io.mosip.registration.mdm.dto.MdmBioDevice;
@@ -256,6 +260,18 @@ public class BiometricsController extends BaseController /* implements Initializ
 	private Service<List<BiometricsDto>> rCaptureTaskService;
 
 	private Service<MdmBioDevice> deviceSearchTask;
+
+	@Autowired
+	private LivenessService livenessService;
+
+	@Autowired
+	private LivenessAuthGate livenessAuthGate;
+
+	// Face liveness of the onboarding (section 2.4 of docs/workflows.md): the face an operator or a supervisor enrols
+	// goes through the liveness check of the sign-in, with the settings of the OPERATOR workflow.
+	private LivenessAuthScan livenessAuthScan;
+	// Set by the capture task: the captured face was refused by the liveness gate and is not stored.
+	private volatile boolean onboardFaceRefused;
 
 	public void stopRCaptureService() {
 		if (rCaptureTaskService != null && rCaptureTaskService.isRunning()) {
@@ -486,6 +502,9 @@ public class BiometricsController extends BaseController /* implements Initializ
 
 	private void displayExceptionBiometric(String modality) {
 
+		if (!modality.equals(currentModality)) {
+			closeOnboardFaceLiveness();
+		}
 		retryBox.setVisible(true);
 		biometricBox.setVisible(true);
 		biometricType.setText(applicationLabelBundle.getString(modality));
@@ -666,6 +685,9 @@ public class BiometricsController extends BaseController /* implements Initializ
 
 		LOGGER.info(LOG_REG_BIOMETRIC_CONTROLLER, APPLICATION_NAME, APPLICATION_ID, "Displaying biometrics to capture");
 
+		if (!modality.equals(currentModality)) {
+			closeOnboardFaceLiveness();
+		}
 		retryBox.setVisible(true);
 		biometricBox.setVisible(true);
 		biometricType.setText(applicationLabelBundle.getString(modality));
@@ -921,6 +943,15 @@ public class BiometricsController extends BaseController /* implements Initializ
 
 				MdmBioDevice mdmBioDevice = deviceSearchTask.getValue();
 
+				if (mdmBioDevice != null && isOnboardFaceLiveness()) {
+					// The scan streams the face and asks for the capture once liveness is established. Pressing
+					// Scan again during the check keeps the same attempt.
+					biometric.setDisable(false);
+					livenessAuthScan().start(Workflow.OPERATOR, SessionContext.userId(), biometricImage,
+							BiometricsController.this::rCaptureTaskService);
+					return;
+				}
+
 				try {
 
 
@@ -987,6 +1018,37 @@ public class BiometricsController extends BaseController /* implements Initializ
 		return currentModality != null && currentModality.toUpperCase().contains(RegistrationConstants.FACE.toUpperCase());
 	}
 
+	/** The onboarding face, with liveness enabled for the sign-in of operators. */
+	private boolean isOnboardFaceLiveness() {
+		return isUserOnboardFlag && isFace(currentModality) && livenessAuthScan().isEnabled(Workflow.OPERATOR);
+	}
+
+	private LivenessAuthScan livenessAuthScan() {
+		if (livenessAuthScan == null) {
+			livenessAuthScan = LivenessAuthScan.forEnrolment(livenessService, livenessAuthGate, bioService, streamer,
+					key -> generateAlert(RegistrationConstants.ERROR,
+							RegistrationUIConstants.getMessageLanguageSpecific(key)));
+		}
+		return livenessAuthScan;
+	}
+
+	/** Ends the liveness check of the face and takes its pane off the screen, when another modality is shown. */
+	private void closeOnboardFaceLiveness() {
+		if (livenessAuthScan != null) {
+			livenessAuthScan.close();
+		}
+	}
+
+	/**
+	 * Called by the capture task, off the UI thread: an onboarding face is stored only if the liveness gate accepts
+	 * it. The gate lets every face through when liveness is disabled, and refuses one captured without an established
+	 * liveness check, so a path that skips the check fails closed.
+	 */
+	static boolean acceptOnboardFace(boolean onboarding, boolean face, LivenessAuthGate gate, String userId,
+			List<BiometricsDto> captured) {
+		return !onboarding || !face || gate.accept(Workflow.OPERATOR, userId, captured);
+	}
+
 	private List<String> getSelectedExceptionsByBioType(String subType, String modality)
 			throws RegBaseCheckedException {
 		List<String> selectedExceptions = new LinkedList<String>();
@@ -1043,7 +1105,11 @@ public class BiometricsController extends BaseController /* implements Initializ
 								"Capture request started" + System.currentTimeMillis());
 
 						currentSubType = getListOfBiometricSubTypes().get(currentPosition);
-						return rCapture(currentSubType, currentModality);
+						String modality = currentModality;
+						List<BiometricsDto> captured = rCapture(currentSubType, modality);
+						onboardFaceRefused = !acceptOnboardFace(isUserOnboardFlag, isFace(modality), livenessAuthGate,
+								SessionContext.userId(), captured);
+						return onboardFaceRefused ? new LinkedList<>() : captured;
 
 					}
 				};
@@ -1056,6 +1122,10 @@ public class BiometricsController extends BaseController /* implements Initializ
 			public void handle(WorkerStateEvent t) {
 
 				LOGGER.debug(LOG_REG_BIOMETRIC_CONTROLLER, APPLICATION_NAME, APPLICATION_ID, "RCapture task failed");
+				// A capture that fails after liveness ends the attempt.
+				if (livenessAuthScan != null) {
+					livenessAuthScan.end();
+				}
 				generateAlert(RegistrationConstants.ERROR, RegistrationUIConstants.getMessageLanguageSpecific(RegistrationUIConstants.BIOMETRIC_SCANNING_ERROR));
 
 				LOGGER.debug(LOG_REG_BIOMETRIC_CONTROLLER, APPLICATION_NAME, APPLICATION_ID, "Enabling LogOut");
@@ -1075,6 +1145,11 @@ public class BiometricsController extends BaseController /* implements Initializ
 				LOGGER.debug(LOG_REG_BIOMETRIC_CONTROLLER, APPLICATION_NAME, APPLICATION_ID,
 						"RCapture task was successful");
 				try {
+					if (onboardFaceRefused) {
+						// The pane shows the generic failure of the attempt, which counts; nothing is stored.
+						LOGGER.info("Onboarding face refused by the liveness check");
+						return;
+					}
 					List<BiometricsDto> mdsCapturedBiometricsList = rCaptureTaskService.getValue();
 					boolean isValidBiometric = isValidBiometric(mdsCapturedBiometricsList);
 					LOGGER.debug("biometrics captured from mock/real MDM was valid : {}", isValidBiometric);
@@ -1142,6 +1217,10 @@ public class BiometricsController extends BaseController /* implements Initializ
 					
 					generateAlert(RegistrationConstants.ALERT_INFORMATION,
 							RegistrationUIConstants.getMessageLanguageSpecific(RegistrationUIConstants.BIOMETRIC_CAPTURE_SUCCESS));
+					if (isUserOnboardFlag && isFace(currentModality)) {
+						// A face enrolled after liveness: the attempts start again from zero, as after a sign-in.
+						livenessAuthGate.authenticated(Workflow.OPERATOR, SessionContext.userId());
+					}
 					biometric.setDisable(false);
 				} catch (Exception exception) {
 					LOGGER.error("Exception while getting the scanned biometrics for operator onboarding", exception);
@@ -1151,6 +1230,10 @@ public class BiometricsController extends BaseController /* implements Initializ
 					SessionContext.setAutoLogout(true);
 					streamer.setUrlStream(null);
 					biometric.setDisable(false);
+					// The capture ends the liveness check: its stream stops and its session closes.
+					if (livenessAuthScan != null) {
+						livenessAuthScan.end();
+					}
 				}
 			}
 		});
