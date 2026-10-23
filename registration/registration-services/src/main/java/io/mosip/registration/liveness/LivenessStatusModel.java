@@ -91,9 +91,18 @@ public final class LivenessStatusModel {
 			b.band("LIVENESS_MAX_ATTEMPTS").detail("LIVENESS_EXCEPTION_INFO");
 			b.continueUnderException = true;
 		} else {
-			b.band("LIVENESS_MAX_ATTEMPTS_BLOCKED");
+			return blocked();
 		}
 		return b.build();
+	}
+
+	/**
+	 * Attempts exhausted on a screen that offers no other way to go on, such as the onboarding of an operator: the
+	 * user is sent to the supervisor.
+	 */
+	public static LivenessStatusModel blocked() {
+		return new Builder().tone(Tone.FAILURE).status("livenessNotVerified").band("LIVENESS_MAX_ATTEMPTS_BLOCKED")
+				.build();
 	}
 
 	/**

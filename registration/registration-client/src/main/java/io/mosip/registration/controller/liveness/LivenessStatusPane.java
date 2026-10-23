@@ -126,6 +126,11 @@ public final class LivenessStatusPane extends VBox {
 		render(LivenessStatusModel.maxAttempts(workflow, exceptionAllowed));
 	}
 
+	/** Attempts exhausted on a screen that offers no other way to go on: the user is sent to the supervisor. */
+	public void showBlocked() {
+		render(LivenessStatusModel.blocked());
+	}
+
 	/** The face of the resident was captured under the exception process: a supervisor authenticates at submission. */
 	public void showExceptionCaptured() {
 		render(LivenessStatusModel.exceptionCaptured());
