@@ -14,6 +14,7 @@ import java.lang.reflect.Modifier;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -157,8 +158,8 @@ public class LivenessConfigProviderTest {
 		values.put(P + "passive.threshold.pass", "0.5");
 		values.put(P + "passive.threshold.attack", "0.6");
 		LivenessPolicy p = policy(Workflow.RESIDENT);
-		assertEquals(0.85, p.passThreshold(), 0);
-		assertEquals(0.30, p.attackThreshold(), 0);
+		assertEquals(LivenessPolicy.defaults().passThreshold(), p.passThreshold(), 0);
+		assertEquals(LivenessPolicy.defaults().attackThreshold(), p.attackThreshold(), 0);
 	}
 
 	@Test
@@ -223,6 +224,6 @@ public class LivenessConfigProviderTest {
 		String text = provider.forWorkflow(Workflow.SUPERVISOR).toString();
 		assertTrue(text, text.startsWith("SUPERVISOR"));
 		assertTrue(text, text.contains("enabled=true"));
-		assertTrue(text, text.contains("pass=0.85"));
+		assertTrue(text, text.contains(String.format(Locale.ROOT, "pass=%.2f", LivenessPolicy.defaults().passThreshold())));
 	}
 }

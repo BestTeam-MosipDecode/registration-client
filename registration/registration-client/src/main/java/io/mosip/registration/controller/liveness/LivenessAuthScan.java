@@ -12,6 +12,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import io.mosip.kernel.core.logger.spi.Logger;
 import io.mosip.registration.config.AppConfig;
@@ -47,6 +48,11 @@ import javafx.scene.layout.Pane;
  * successful face authentication; there is no exception process for authentication.
  *
  * <p>
+ * The onboarding of an operator or a supervisor uses the same scan for the face it enrols ({@link #forEnrolment}):
+ * the user is already signed in, so after the last attempt the pane sends the user to the supervisor instead of
+ * offering another sign-in method.
+ *
+ * <p>
  * Every method is called on the JavaFX thread.
  */
 public final class LivenessAuthScan {
@@ -70,9 +76,13 @@ public final class LivenessAuthScan {
 	private final Streamer streamer;
 	private final Consumer<String> errorAlert;
 	private final Runnable otherSignIn;
+	// Onboarding: no other sign-in method after the last attempt.
+	private final boolean enrolment;
 	private BiConsumer<Workflow, String> onFailedAttempt = (workflow, userId) -> {
 	};
 	private LivenessStatusPane pane;
+	// Operator and supervisor screens look the same. Tests give texts of their own.
+	Supplier<LivenessStatusPane> paneFactory = () -> new LivenessStatusPane(Workflow.OPERATOR);
 	private Scan scan;
 
 	/**
@@ -84,12 +94,27 @@ public final class LivenessAuthScan {
 	 */
 	public LivenessAuthScan(LivenessService livenessService, LivenessAuthGate gate, BioService bioService,
 			Streamer streamer, Consumer<String> errorAlert, Runnable otherSignIn) {
+		this(livenessService, gate, bioService, streamer, errorAlert, otherSignIn, false);
+	}
+
+	private LivenessAuthScan(LivenessService livenessService, LivenessAuthGate gate, BioService bioService,
+			Streamer streamer, Consumer<String> errorAlert, Runnable otherSignIn, boolean enrolment) {
 		this.livenessService = livenessService;
 		this.gate = gate;
 		this.bioService = bioService;
 		this.streamer = streamer;
 		this.errorAlert = errorAlert;
 		this.otherSignIn = otherSignIn;
+		this.enrolment = enrolment;
+	}
+
+	/**
+	 * The scan of an onboarding screen, where the user enrols a face: after the last attempt the pane sends the user
+	 * to the supervisor, with no action.
+	 */
+	public static LivenessAuthScan forEnrolment(LivenessService livenessService, LivenessAuthGate gate,
+			BioService bioService, Streamer streamer, Consumer<String> errorAlert) {
+		return new LivenessAuthScan(livenessService, gate, bioService, streamer, errorAlert, null, true);
 	}
 
 	/**
@@ -131,8 +156,7 @@ public final class LivenessAuthScan {
 	 */
 	private LivenessStatusPane pane(ImageView image) {
 		if (pane == null) {
-			// Operator and supervisor screens look the same.
-			pane = new LivenessStatusPane(Workflow.OPERATOR);
+			pane = paneFactory.get();
 			pane.setOnOtherSignIn(otherSignIn);
 		}
 		if (pane.getParent() == null || pane.getParent() != image.getParent()) {
@@ -162,7 +186,7 @@ public final class LivenessAuthScan {
 		LivenessConfig config = livenessService.config(workflow);
 		AtomicInteger attempts = gate.attempts(workflow, userId);
 		if (LivenessService.decide(config, attempts.get()) != LivenessService.ScanDecision.LIVENESS) {
-			statusPane.showMaxAttempts(false);
+			showMaxAttempts();
 			return;
 		}
 		statusPane.reset();
@@ -182,6 +206,25 @@ public final class LivenessAuthScan {
 		scan = null;
 		if (ended != null) {
 			ended.end();
+		}
+	}
+
+	/**
+	 * Ends the scan and takes the pane off the screen, for a screen that shows another modality in the same image.
+	 * The next scan places the pane again.
+	 */
+	public void close() {
+		end();
+		if (pane != null && pane.getParent() instanceof Pane) {
+			((Pane) pane.getParent()).getChildren().remove(pane);
+		}
+	}
+
+	private void showMaxAttempts() {
+		if (enrolment) {
+			pane.showBlocked();
+		} else {
+			pane.showMaxAttempts(false);
 		}
 	}
 
@@ -233,7 +276,7 @@ public final class LivenessAuthScan {
 					if (scan == this) {
 						scan = null;
 						end();
-						pane.showMaxAttempts(false);
+						showMaxAttempts();
 					}
 				});
 				return;
@@ -278,7 +321,7 @@ public final class LivenessAuthScan {
 				}
 				if (update.state() == SessionState.FAILED && LivenessService.decide(config,
 						attempts.get()) != LivenessService.ScanDecision.LIVENESS) {
-					pane.showMaxAttempts(false);
+					showMaxAttempts();
 				} else {
 					pane.show(update);
 				}

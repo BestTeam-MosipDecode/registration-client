@@ -206,6 +206,14 @@ public class LivenessStatusModelTest {
 	}
 
 	@Test
+	public void aBlockedScreenSendsTheUserToTheSupervisorWithoutAnyAction() {
+		LivenessStatusModel model = LivenessStatusModel.blocked();
+		assertEquals("LIVENESS_MAX_ATTEMPTS_BLOCKED", model.band().key());
+		assertEquals("livenessNotVerified", model.statusLabel());
+		assertFalse(model.retry() || model.continueUnderException() || model.otherSignIn());
+	}
+
+	@Test
 	public void authenticationNeverOffersTheExceptionProcess() {
 		for (Workflow workflow : new Workflow[] { Workflow.OPERATOR, Workflow.SUPERVISOR }) {
 			LivenessStatusModel model = LivenessStatusModel.maxAttempts(workflow, true);
