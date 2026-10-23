@@ -63,6 +63,9 @@ public final class LivenessAuthScan {
 	private static final long DEFAULT_CAPTURE_TIMEOUT_MS = 60000;
 	private static final long COMPARISON_MARGIN_MS = 30000;
 
+	// Style of the pane on the onboarding screen (liveness.css).
+	static final String COMPACT_STYLE = "liveness-compact";
+
 	// Opening and ending sessions in order, off the JavaFX thread: the engine loads its models on first use.
 	private static final ExecutorService SESSIONS = Executors.newSingleThreadExecutor(task -> {
 		Thread thread = new Thread(task, "liveness-authentication");
@@ -158,6 +161,10 @@ public final class LivenessAuthScan {
 		if (pane == null) {
 			pane = paneFactory.get();
 			pane.setOnOtherSignIn(otherSignIn);
+			if (enrolment) {
+				// The onboarding screen shows a small face image: smaller texts, so that they are read whole.
+				pane.getStyleClass().add(COMPACT_STYLE);
+			}
 		}
 		if (pane.getParent() == null || pane.getParent() != image.getParent()) {
 			if (pane.getParent() instanceof Pane) {

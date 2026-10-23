@@ -6,6 +6,7 @@
 package io.mosip.registration.controller.liveness;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -124,8 +125,15 @@ public class LivenessAuthScanTest {
 	@Test(timeout = 20000)
 	public void afterTheLastAttemptAnEnrolmentOffersNoOtherSignIn() throws Exception {
 		Assume.assumeTrue("no display", toolkit);
-		assertEquals(1, buttonsShownAfterTheLastAttempt(false));
-		assertEquals(0, buttonsShownAfterTheLastAttempt(true));
+		assertEquals(1, buttonsShown(paneAfterTheLastAttempt(false)));
+		assertEquals(0, buttonsShown(paneAfterTheLastAttempt(true)));
+	}
+
+	@Test(timeout = 20000)
+	public void onlyTheEnrolmentPaneIsCompact() throws Exception {
+		Assume.assumeTrue("no display", toolkit);
+		assertFalse(paneAfterTheLastAttempt(false).getStyleClass().contains(LivenessAuthScan.COMPACT_STYLE));
+		assertTrue(paneAfterTheLastAttempt(true).getStyleClass().contains(LivenessAuthScan.COMPACT_STYLE));
 	}
 
 	@Test(timeout = 20000)
@@ -169,8 +177,8 @@ public class LivenessAuthScanTest {
 		return config;
 	}
 
-	/** Starts a scan for a user with no attempt left and counts the buttons its pane shows. */
-	private long buttonsShownAfterTheLastAttempt(boolean enrolment) throws Exception {
+	/** Starts a scan for a user with no attempt left and returns its pane. */
+	private LivenessStatusPane paneAfterTheLastAttempt(boolean enrolment) throws Exception {
 		String user = enrolment ? "enrolled" : "signing-in";
 		gate.attempts(Workflow.OPERATOR, user).set(config().getPolicy().maxAttempts());
 		LivenessAuthScan exhausted = enrolment
@@ -188,9 +196,13 @@ public class LivenessAuthScanTest {
 			exhausted.start(Workflow.OPERATOR, user, image, () -> {
 			});
 		});
-		return screen.getChildren().stream().filter(LivenessStatusPane.class::isInstance)
-				.flatMap(pane -> ((Pane) pane).getChildren().stream()).filter(Node::isVisible)
-				.filter(HBox.class::isInstance).flatMap(box -> ((HBox) box).getChildren().stream())
+		return (LivenessStatusPane) screen.getChildren().stream().filter(LivenessStatusPane.class::isInstance)
+				.findFirst().orElseThrow(AssertionError::new);
+	}
+
+	private static long buttonsShown(LivenessStatusPane pane) {
+		return pane.getChildren().stream().filter(Node::isVisible).filter(HBox.class::isInstance)
+				.flatMap(box -> ((HBox) box).getChildren().stream())
 				.filter(button -> button instanceof Button && button.isVisible()).count();
 	}
 

@@ -152,3 +152,27 @@
 	-fx-font-size: 15px;
 	-fx-padding: 8 20 8 20;
 }
+
+/* Onboarding of an operator or a supervisor: the pane covers a face image about 290 px wide. Last in the file, so
+   that it wins over the sizes of the authentication screens. */
+.liveness-compact {
+	-fx-spacing: 4;
+}
+
+.liveness-compact .liveness-band {
+	-fx-padding: 6 10 6 10;
+	-fx-border-width: 0 0 0 4;
+}
+
+.liveness-compact .liveness-band-text {
+	-fx-font-size: 15px;
+}
+
+.liveness-compact .liveness-band.liveness-tone-instruction .liveness-band-text {
+	-fx-font-size: 20px;
+	-fx-font-weight: bold;
+}
+
+.liveness-compact .liveness-detail {
+	-fx-font-size: 12px;
+}
