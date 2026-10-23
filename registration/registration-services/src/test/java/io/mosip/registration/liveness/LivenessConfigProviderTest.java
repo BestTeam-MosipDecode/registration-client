@@ -179,7 +179,7 @@ public class LivenessConfigProviderTest {
 		values.put(P + "active.challenge_timeout_ms", "3000");
 		LivenessPolicy p = policy(Workflow.RESIDENT);
 		assertEquals(600, p.baselineMs());
-		assertEquals(8000, p.challengeTimeoutMs());
+		assertEquals(LivenessPolicy.defaults().challengeTimeoutMs(), p.challengeTimeoutMs());
 	}
 
 	@Test
