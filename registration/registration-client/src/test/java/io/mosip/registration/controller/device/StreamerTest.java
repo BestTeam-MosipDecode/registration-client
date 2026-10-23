@@ -60,6 +60,51 @@ public class StreamerTest {
 		assertArrayEquals(JPEG, Arrays.copyOf(image, JPEG.length));
 	}
 
+	@Test
+	public void readsThePassiveScoreSentByTheDeviceWithAFrame() throws IOException {
+		ByteArrayOutputStream out = new ByteArrayOutputStream();
+		out.write(("--BoundaryString\r\nContent-Type:image/jpeg\r\nX-Liveness-Score:0.9731\r\nContent-Length:"
+				+ JPEG.length + "\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+		out.write(JPEG);
+		out.write("\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
+		out.write(part(JPEG));
+		ByteArrayInputStream stream = new ByteArrayInputStream(out.toByteArray());
+		Streamer.StreamFrame scored = streamer.readFrame(stream);
+		assertArrayEquals(JPEG, Arrays.copyOf(scored.image, JPEG.length));
+		assertEquals(0.9731, scored.livenessScore, 0.0);
+		assertNull("a frame without the header has no score", streamer.readFrame(stream).livenessScore);
+	}
+
+	@Test
+	public void aScoreThatIsNotANumberIsNoScore() {
+		assertNull(Streamer.livenessScore("Content-Type:image/jpeg\r\nX-Liveness-Score:high\r\nContent-Length:"));
+		assertNull(Streamer.livenessScore("Content-Type:image/jpeg\r\nX-Liveness-Score:NaN\r\nContent-Length:"));
+		assertEquals(0.5, Streamer.livenessScore("X-Liveness-Score: 0.5\r\n"), 0.0);
+	}
+
+	@Test
+	public void theListenerReceivesTheScoreWithTheFrame() {
+		List<Double> scores = new ArrayList<>();
+		streamer.setFrameListener(new StreamFrameListener() {
+			@Override
+			public void onFrame(byte[] jpeg) {
+				scores.add(null);
+			}
+
+			@Override
+			public void onFrame(byte[] jpeg, Double livenessScore) {
+				scores.add(livenessScore);
+			}
+
+			@Override
+			public void onStreamInterrupted(Throwable cause) {
+			}
+		});
+		streamer.notifyFrame(JPEG, 0.42);
+		streamer.notifyFrame(JPEG);
+		assertEquals(Arrays.asList(0.42, null), scores);
+	}
+
 	@Test(expected = EOFException.class, timeout = 5000)
 	public void theEndOfTheStreamStopsTheReading() throws IOException {
 		streamer.retrieveNextImage(new ByteArrayInputStream("--mosip\r\n".getBytes(StandardCharsets.US_ASCII)));

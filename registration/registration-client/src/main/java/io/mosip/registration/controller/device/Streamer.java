@@ -36,10 +36,14 @@ public class Streamer {
 	}
 
 	void notifyFrame(byte[] frame) {
+		notifyFrame(frame, null);
+	}
+
+	void notifyFrame(byte[] frame, Double livenessScore) {
 		StreamFrameListener listener = frameListener;
 		if (listener != null) {
 			try {
-				listener.onFrame(frame);
+				listener.onFrame(frame, livenessScore);
 			} catch (Throwable exception) {
 				LOGGER.error("Frame listener failed", exception);
 			}
@@ -126,6 +130,8 @@ public class Streamer {
 
 	private final String CONTENT_LENGTH = "Content-Length:";
 
+	private static final String LIVENESS_SCORE = "X-Liveness-Score:";
+
 	private Thread streamer_thread = null;
 
 	public byte[] imageBytes = null;
@@ -179,8 +185,9 @@ public class Streamer {
 				// Each thread reads its own stream and stops when the client closes or replaces it.
 				while (urlStream == inputStream && null != inputStream) {
 					try {
-						imageBytes = retrieveNextImage(inputStream);
-						notifyFrame(imageBytes);
+						StreamFrame frame = readFrame(inputStream);
+						imageBytes = frame.image;
+						notifyFrame(imageBytes, frame.livenessScore);
 						ByteArrayInputStream imageStream = new ByteArrayInputStream(imageBytes);
 						Image img = new Image(imageStream);
 						streamImage.setImage(img);
@@ -214,6 +221,44 @@ public class Streamer {
 	 * @throws IOException
 	 */
 	public byte[] retrieveNextImage(InputStream urlStream) throws IOException {
+		return readFrame(urlStream).image;
+	}
+
+	/** One frame of the device stream, with the passive liveness score the device sent in its header, or null. */
+	static final class StreamFrame {
+		final byte[] image;
+		final Double livenessScore;
+
+		StreamFrame(byte[] image, Double livenessScore) {
+			this.image = image;
+			this.livenessScore = livenessScore;
+		}
+	}
+
+	/**
+	 * The passive liveness score in the header of a frame ({@code X-Liveness-Score}), as sent by a face device that
+	 * computes it (section 4 of the decision flow of face-liveness-pad), or null when there is none or it is not a
+	 * number.
+	 */
+	static Double livenessScore(String frameHeader) {
+		int start = frameHeader.indexOf(LIVENESS_SCORE);
+		if (start < 0) {
+			return null;
+		}
+		start += LIVENESS_SCORE.length();
+		int end = start;
+		while (end < frameHeader.length() && frameHeader.charAt(end) != '\r' && frameHeader.charAt(end) != '\n') {
+			end++;
+		}
+		try {
+			double score = Double.parseDouble(frameHeader.substring(start, end).trim());
+			return Double.isFinite(score) ? score : null;
+		} catch (NumberFormatException exception) {
+			return null;
+		}
+	}
+
+	StreamFrame readFrame(InputStream urlStream) throws IOException {
 
 		int currByte = -1;
 
@@ -265,7 +310,7 @@ public class Streamer {
 			offset += numRead;
 		}
 
-		return imageBytes;
+		return new StreamFrame(imageBytes, livenessScore(headerWriter.toString()));
 	}
 
 	/**

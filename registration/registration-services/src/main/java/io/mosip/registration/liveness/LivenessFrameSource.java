@@ -64,6 +64,16 @@ public class LivenessFrameSource implements StreamFrameListener {
 		session.submit(jpeg, clock.getAsLong());
 	}
 
+	/** The session uses the passive score of the device instead of its own, on the frames it can use. */
+	@Override
+	public void onFrame(byte[] jpeg, Double livenessScore) {
+		if (livenessScore == null) {
+			onFrame(jpeg);
+		} else {
+			session.submit(jpeg, clock.getAsLong(), livenessScore);
+		}
+	}
+
 	/**
 	 * To call when the capture request is sent: the device may then end its stream, which is not an interruption.
 	 * Frames keep going to the session, which follows the face until the captured image is checked.
